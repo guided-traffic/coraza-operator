@@ -1,0 +1,16 @@
+apiVersion: v2
+name: coraza-operator
+description: Kubernetes operator for Coraza WAF engine lifecycle management
+type: application
+version: 0.1.0
+appVersion: dev
+keywords:
+  - waf
+  - coraza
+  - security
+home: https://github.com/guided-traffic/coraza-operator
+sources:
+  - https://github.com/guided-traffic/coraza-operator
+maintainers:
+  - name: Guided Traffic GmbH
+    email: mail@hans-fischer.com

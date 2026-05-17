@@ -1,0 +1,85 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "coraza-operator.fullname" . }}
+  namespace: {{ include "coraza-operator.namespace" . }}
+  labels:
+    {{- include "coraza-operator.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "coraza-operator.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "coraza-operator.labels" . | nindent 8 }}
+      annotations:
+        kubectl.kubernetes.io/default-container: manager
+    spec:
+      serviceAccountName: {{ include "coraza-operator.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      terminationGracePeriodSeconds: 10
+      containers:
+      - name: manager
+        image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        command: ["/manager"]
+        args:
+        - --health-probe-bind-address=:{{ .Values.healthz.port }}
+        - --metrics-bind-address=:{{ .Values.metrics.port }}
+        - --metrics-secure=false
+        {{- if .Values.leaderElection }}
+        - --leader-elect
+        {{- end }}
+        env:
+        - name: DEFAULT_ENGINE_IMAGE
+          value: "{{ .Values.engineImage.repository }}:{{ .Values.engineImage.tag }}"
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: GRPC_LISTEN_ADDR
+          value: ":{{ .Values.grpc.port }}"
+        - name: OPERATOR_GRPC_ADDR
+          value: "{{ .Values.grpc.serviceName }}.$(POD_NAMESPACE).svc:{{ .Values.grpc.port }}"
+        ports:
+        - name: grpc
+          containerPort: {{ .Values.grpc.port }}
+          protocol: TCP
+        - name: metrics
+          containerPort: {{ .Values.metrics.port }}
+          protocol: TCP
+        - name: healthz
+          containerPort: {{ .Values.healthz.port }}
+          protocol: TCP
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: {{ .Values.healthz.port }}
+          initialDelaySeconds: 15
+          periodSeconds: 20
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: {{ .Values.healthz.port }}
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        securityContext:
+          readOnlyRootFilesystem: true
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
+        {{- with .Values.resources }}
+        resources:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        volumeMounts: []
+      volumes: []

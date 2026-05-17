@@ -1,0 +1,9 @@
+apiVersion: waf.gtrfc.com/v1
+kind: SecRules
+metadata:
+  name: block-attack
+  namespace: coraza-demo
+spec:
+  description: "Blocks any URI containing /attack"
+  rules: |
+    SecRule REQUEST_URI "@contains /attack" "id:1001,phase:1,deny,status:403,msg:'demo block'"

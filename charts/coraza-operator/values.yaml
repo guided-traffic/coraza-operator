@@ -1,0 +1,54 @@
+# namespace controls where the operator is installed.
+namespace:
+  # create: set to true to have Helm create the install namespace.
+  create: false
+  # name: used only when create is true.
+  name: coraza-system
+
+# installCRDs: set to false to skip CRD installation (e.g. when managed externally).
+installCRDs: true
+
+# image: operator container image.
+image:
+  repository: harbor.k8s-main.wds18.net/guidedtraffic/coraza-operator
+  tag: dev
+  pullPolicy: Always
+
+# engineImage: default engine container image injected as DEFAULT_ENGINE_IMAGE env var.
+# Individual Engine resources can override this with spec.image.
+engineImage:
+  repository: harbor.k8s-main.wds18.net/guidedtraffic/coraza-engine
+  tag: dev
+
+# imagePullSecrets: optional list of image pull secrets for the operator pod.
+imagePullSecrets: []
+# - name: my-registry-secret
+
+# resources: resource requests/limits for the operator container.
+resources: {}
+# requests:
+#   cpu: 50m
+#   memory: 64Mi
+# limits:
+#   cpu: 500m
+#   memory: 128Mi
+
+# leaderElection: enable leader election (set true for HA deployments).
+leaderElection: false
+
+# grpc: gRPC config-distribution server settings.
+grpc:
+  port: 9443
+  # serviceName: the ClusterIP Service name for the gRPC endpoint.
+  serviceName: coraza-operator-grpc
+
+# metrics: Prometheus metrics endpoint.
+metrics:
+  port: 8080
+
+# healthz: liveness/readiness probe endpoint.
+healthz:
+  port: 8081
+
+# logLevel: zap log level (debug, info, warn, error).
+logLevel: info

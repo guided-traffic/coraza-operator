@@ -1,0 +1,11 @@
+apiVersion: waf.gtrfc.com/v1
+kind: RuleSet
+metadata:
+  name: demo-ruleset
+  namespace: coraza-demo
+spec:
+  sources:
+    - kind: SecRules
+      name: baseline-rules
+    - kind: SecRules
+      name: block-attack

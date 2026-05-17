@@ -1,0 +1,49 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: coraza-demo
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: example-upstream
+  namespace: coraza-demo
+  labels:
+    app: example-upstream
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: example-upstream
+  template:
+    metadata:
+      labels:
+        app: example-upstream
+    spec:
+      containers:
+      - name: http-echo
+        image: hashicorp/http-echo:1.0.0
+        args:
+        - -text=ok
+        - -listen=:8080
+        ports:
+        - name: http
+          containerPort: 8080
+          protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: example-upstream
+  namespace: coraza-demo
+  labels:
+    app: example-upstream
+spec:
+  type: ClusterIP
+  selector:
+    app: example-upstream
+  ports:
+  - name: http
+    port: 80
+    targetPort: http
+    protocol: TCP

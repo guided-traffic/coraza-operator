@@ -8,84 +8,76 @@ Antwortfeld. Bitte direkt darunter beantworten. Mehrfachauswahl und Freitext erl
 ## 0. Projekt-Metadaten
 
 ### 0.1 Wie soll das fertige Projekt heißen (Repo, Modulpfad, Image-Name)?
-Antwort:
+Antwort: coraza-operator ist der Produktname. Der Repo ist unter: https://github.com/guided-traffic/coraza-operator erreichbar. Releast werden die Images unter docker.io/guidedtraffic/coraza-operator veröffentlicht.
 
 ### 0.2 Welche Lizenz?
-Antwort:
+Antwort: Apache 2.0
 
 ### 0.3 Wer ist Zielnutzer (interne Plattform-Teams, Open-Source-Community, beides)?
-Antwort:
+Antwort: Zielnutzer ist der Betrieb durch das Plattform-Team eines Unternehmens welches auf die Provisionierung der Kubernetes-Umgebung übernimmt. Ziel ist die zentrale Bereitstellung durch dieses Team, die ausgestaltung der Regelns soll aber in den Händen der jeweiligen Applikationen liegen.
 
 ### 0.4 Welche Mindest-Kubernetes-Version wird unterstützt?
-Antwort:
+Antwort: 1.33.x
 
 ### 0.5 Soll der Operator nur auf einer Distribution (z. B. Vanilla, OpenShift, EKS, GKE) laufen oder distributionsneutral sein?
-Antwort:
+Antwort: Es soll so konzipiert sein, dass es auf einem Standard-Kubernetes-Cluster läuft. Wir versuchen den Operator agnositisch aufzubauen. So dass dieser in vielen Kubernetes Umgebungen lauffähig ist. Die Engine selbst wird dann aber auf ein bestimmtes Tool zugeschnitte.
 
 ---
 
 ## 1. Scope & Architektur-Grundsätze
 
 ### 1.1 MVP-Umfang: Welche Funktionen müssen Version 0.1.0 unbedingt enthalten?
-Optionen:
-- (a) Nur SecLangRules + RuleSet + Engine + Coraza-HTTP-Reverse-Proxy
-- (b) MVP + Frontend (read-only Stats)
-- (c) MVP + Frontend + HAProxy-Integration (SPOE)
-- (d) Anderer Umfang
-
-Antwort:
+Antwort: SecRules, ClusterSecRules, RuleSet, ClusterRuleSet, Engine + Frontend.
+Der HA-Proxy selbst wird in diesem Chart nicht gemanaged, ein dediziertes HA-Proxy Setup mit SPOE-Integration muss vom Applikation Team betrieben werden und ist nicht Teil dieses Tools.
 
 ### 1.2 Soll der Operator namespace-scoped, cluster-scoped, oder konfigurierbar sein?
-Antwort:
+Antwort: Der Operatior aggiert cluster-weit
 
 ### 1.3 Sollen CRDs cluster-scoped oder namespace-scoped sein? Pro CRD entscheiden:
-- SecLangRules:
-- RuleSet:
-- Engine:
+- SecRules: namespaced
+- ClusterSecRules: cluster
+- RuleSet: namespaced
+- Engine: namespaced
 
-Antwort:
-
-### 1.4 Erlaubt das Modell Cross-Namespace-Referenzen (z. B. RuleSet in NS A referenziert SecLangRules in NS B)?
-Antwort:
+### 1.4 Erlaubt das Modell Cross-Namespace-Referenzen (z. B. RuleSet in NS A referenziert SecRules in NS B)?
+Antwort: Nein. Aber RuleSet können ClusterSecRules integrieren.
 
 ### 1.5 Wie viele Engines pro Cluster realistisch (10, 100, 1000+)? Beeinflusst Reconcile-Design.
-Antwort:
+Antwort: Es können 10+ Engines pro Cluster betrieben werden.
 
 ### 1.6 Sollen mehrere Engine-Typen architektonisch von Anfang an vorgesehen werden (Plug-in-Interface), auch wenn nur Coraza implementiert wird?
-Antwort:
+Antwort: Es soll von Anfang an ein Plugin-Interface vorgesehen werden, damit später weitere Engines (z. B. ModSecurity v3, lua-resty-waf) ergänzt werden können. Wir beginnen zunächst mit Coraza welches nach dem Start das aktuelle Ruleset vom Operator abholt.
 
 ---
 
 ## 2. Technologie-Stack
 
 ### 2.1 Programmiersprache des Operators?
-Optionen: Go (kubebuilder/operator-sdk) | Rust (kube-rs) | andere
-
-Antwort:
+Antwort: Go (kubebuilder/operator-sdk)
 
 ### 2.2 Framework?
 Optionen: kubebuilder | operator-sdk | controller-runtime direkt | andere
 
-Antwort:
+Antwort: Offen, bitte schlage mir ein Framework vor und begründe kurz, warum du es für dieses Projekt für geeignet hältst.
 
 ### 2.3 Code-Generator / Schema-Validierung: OpenAPI v3, CEL-Validation-Rules, Webhook-Validierung?
-Antwort:
+Antwort: OpenAPI v3
 
 ### 2.4 Build- & Release-Tooling (Make, Mage, Earthly, Bazel)?
-Antwort:
+Antwort: Make
 
 ### 2.5 Container-Registry für Operator- und Engine-Images?
-Antwort:
+Antwort: docker.io
 
 ### 2.6 Frontend-Stack (React + Vite, SvelteKit, Vue, HTMX, ...)?
-Antwort:
+Antwort: Angular
 
 ### 2.7 Stats-Backend: Prometheus + Grafana embedded, eigener Time-Series-Store, beides?
-Antwort:
+Antwort: eigene TimescaleDB, muss vom Plattform-Team seperat bereitgestellt werden.
 
 ---
 
-## 3. CRD: SecLangRules
+## 3. CRD: SecRules
 
 ### 3.1 Beispiel zeigt `spec.rules` als großen String. Soll zusätzlich erlaubt sein:
 - (a) Referenz auf ConfigMap (`spec.configMapRef`)
@@ -97,7 +89,7 @@ Antwort:
 Antwort:
 
 ### 3.2 Validierung: Soll der Operator die SecLang-Syntax beim Apply validieren (Admission-Webhook mit Coraza-Parser)?
-Antwort:
+Antwort: Ja, das soll unbedingt passieren. Bitte achte darauf geeignete Fehlermeldungen zurückzugeben, damit der Nutzer genau weiß, was in welcher Zeile falsch ist.
 
 ### 3.3 Wie wird mit ungültigen Regeln umgegangen?
 Optionen:
@@ -105,26 +97,26 @@ Optionen:
 - (b) Akzeptieren, Status auf Invalid, keine Engine-Reload
 - (c) Akzeptieren, Engine läuft mit letzter gültiger Version weiter
 
-Antwort:
+Antwort: b
 
 ### 3.4 Sollen Regeln Variablen/Templating unterstützen (z. B. `{{ .Env.CLUSTER_NAME }}`)?
-Antwort:
+Antwort: Ja, klingt gut.
 
-### 3.5 Größenlimit pro SecLangRules-Objekt (etcd-Limit ~1 MiB)? Bei Überschreitung Chunking via ConfigMap?
-Antwort:
+### 3.5 Größenlimit pro SecRules-Objekt (etcd-Limit ~1 MiB)? Bei Überschreitung Chunking via ConfigMap?
+Antwort: SecRules
 
-### 3.6 Sollen Labels/Selectors auf SecLangRules unterstützt werden, damit RuleSet via Selector statt Namensliste matchen kann?
-Antwort:
+### 3.6 Sollen Labels/Selectors auf SecRules unterstützt werden, damit RuleSet via Selector statt Namensliste matchen kann?
+Antwort: Ja, das wäre eine gute Ergänzung. So könnten RuleSets flexibel Regeln gruppieren, ohne dass die RuleSet-Definition ständig angepasst werden muss.
 
 ---
 
 ## 4. CRD: RuleSet
 
 ### 4.1 Beispiel zeigt `spec.sources` als Liste benannter Referenzen. Reihenfolge wichtig — explizit garantieren?
-Antwort:
+Antwort: Ja die Reihenfolge ist wichtig. Bitte garantieren.
 
 ### 4.2 Soll RuleSet zusätzliche Konfiguration enthalten (Default-Action, AuditLog-Format, BodyLimits)?
-Antwort:
+Antwort: Erstmal nicht.
 
 ### 4.3 Konfliktauflösung bei doppelten SecRule-IDs zwischen Sources?
 Optionen:
@@ -132,13 +124,13 @@ Optionen:
 - (b) Apply-Fehler
 - (c) Operator vergibt Suffix
 
-Antwort:
+Antwort: Apply-Fehler
 
 ### 4.4 Soll RuleSet ein zusammengeführtes "compiled" Artefakt im Status veröffentlichen (Hash, Größe, Regelanzahl)?
-Antwort:
+Antwort: Hash reicht erstmal aus.
 
 ### 4.5 Soll RuleSet-Änderung automatisch alle abhängigen Engines neu konfigurieren, oder Opt-in pro Engine?
-Antwort:
+Antwort: Ja, änderungen müssen zu einem reconcile aller abhängigen Engines führen.
 
 ### 4.6 Unterstützung für Include-Direktiven aus SecLang (verweisen auf andere Objekte)?
 Antwort:

@@ -1,0 +1,43 @@
+syntax = "proto3";
+
+package waf.v1;
+
+option go_package = "github.com/guided-traffic/coraza-operator/proto/waf/v1;wafv1pb";
+
+import "google/protobuf/timestamp.proto";
+
+service ConfigService {
+  // Subscribe streams RuleSetBundle updates for a specific engine.
+  // The server immediately sends the current bundle (if any), then sends one
+  // message every time the engine's RuleSet is recompiled. The stream stays
+  // open until the client disconnects. Requires a verified mTLS client cert.
+  rpc Subscribe(SubscribeRequest) returns (stream RuleSetBundle);
+
+  // Enroll exchanges a bootstrap SA token for a signed client certificate.
+  // No client cert is required for this RPC — the engine does not have one yet.
+  rpc Enroll(EnrollRequest) returns (EnrollResponse);
+}
+
+message SubscribeRequest {
+  string engine_namespace = 1;
+  string engine_name = 2;
+}
+
+message RuleSetBundle {
+  string ruleset_name = 1;    // RuleSet object name
+  string sha256 = 2;           // sha256 of compiled
+  string compiled_seclang = 3; // full compiled bundle
+  google.protobuf.Timestamp generated_at = 4;
+}
+
+message EnrollRequest {
+  string sa_token = 1;          // projected SA JWT
+  string engine_namespace = 2;  // claimed identity (must match token's SA namespace)
+  string engine_name = 3;       // claimed engine name
+  bytes  csr_der = 4;           // ASN.1 DER-encoded CertificateRequest with the engine's public key
+}
+
+message EnrollResponse {
+  bytes client_cert_pem = 1;
+  bytes ca_cert_pem = 2;
+}

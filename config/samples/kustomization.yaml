@@ -1,0 +1,7 @@
+## Append samples of your project ##
+resources:
+- waf_v1_secrules.yaml
+- waf_v1_clustersecrules.yaml
+- waf_v1_ruleset.yaml
+- waf_v1_engine.yaml
+# +kubebuilder:scaffold:manifestskustomizesamples

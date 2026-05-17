@@ -1,0 +1,83 @@
+---
+# ClusterRole: all permissions required by the operator controllers.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "coraza-operator.fullname" . }}-manager
+  labels:
+    {{- include "coraza-operator.labels" . | nindent 4 }}
+rules:
+- apiGroups: [""]
+  resources: [configmaps, serviceaccounts, services]
+  verbs: [create, delete, get, list, patch, update, watch]
+- apiGroups: [""]
+  resources: [events]
+  verbs: [create, patch]
+- apiGroups: [""]
+  resources: [secrets]
+  verbs: [create, get, list, patch, update, watch]
+- apiGroups: [apps]
+  resources: [deployments]
+  verbs: [create, delete, get, list, patch, update, watch]
+- apiGroups: [authentication.k8s.io]
+  resources: [tokenreviews]
+  verbs: [create]
+- apiGroups: [waf.gtrfc.com]
+  resources: [clustersecrules, rulesets, secrules]
+  verbs: [get, list, watch]
+- apiGroups: [waf.gtrfc.com]
+  resources: [clustersecrules/status, engines/status, rulesets/status, secrules/status]
+  verbs: [get, patch, update]
+- apiGroups: [waf.gtrfc.com]
+  resources: [engines]
+  verbs: [create, delete, get, list, patch, update, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "coraza-operator.fullname" . }}-manager
+  labels:
+    {{- include "coraza-operator.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "coraza-operator.fullname" . }}-manager
+subjects:
+- kind: ServiceAccount
+  name: {{ include "coraza-operator.serviceAccountName" . }}
+  namespace: {{ include "coraza-operator.namespace" . }}
+---
+# Role: leader election permissions (namespace-scoped).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "coraza-operator.fullname" . }}-leader-election
+  namespace: {{ include "coraza-operator.namespace" . }}
+  labels:
+    {{- include "coraza-operator.labels" . | nindent 4 }}
+rules:
+- apiGroups: [""]
+  resources: [configmaps]
+  verbs: [get, list, watch, create, update, patch, delete]
+- apiGroups: [coordination.k8s.io]
+  resources: [leases]
+  verbs: [get, list, watch, create, update, patch, delete]
+- apiGroups: [""]
+  resources: [events]
+  verbs: [create, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "coraza-operator.fullname" . }}-leader-election
+  namespace: {{ include "coraza-operator.namespace" . }}
+  labels:
+    {{- include "coraza-operator.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "coraza-operator.fullname" . }}-leader-election
+subjects:
+- kind: ServiceAccount
+  name: {{ include "coraza-operator.serviceAccountName" . }}
+  namespace: {{ include "coraza-operator.namespace" . }}

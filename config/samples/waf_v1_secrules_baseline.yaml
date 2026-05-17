@@ -1,0 +1,11 @@
+apiVersion: waf.gtrfc.com/v1
+kind: SecRules
+metadata:
+  name: baseline-rules
+  namespace: coraza-demo
+spec:
+  description: "Engine setup + body access"
+  rules: |
+    SecRuleEngine On
+    SecRequestBodyAccess On
+    SecResponseBodyAccess Off

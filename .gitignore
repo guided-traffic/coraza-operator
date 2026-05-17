@@ -1,0 +1,48 @@
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+bin/*
+Dockerfile.cross
+
+# Built binaries at repo root (stray go build outputs)
+/engine
+/manager
+/operator
+/coraza-engine
+/coraza-operator
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool, specifically when used with LiteIDE
+*.out
+cover.out
+coverage.*
+
+# Go workspace file
+go.work
+
+# Kubernetes Generated files - skip generated files, except for vendored files
+!vendor/**/zz_generated.*
+
+# editor and IDE paraphernalia
+.idea
+.vscode
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Packaged Helm charts
+charts/**/*.tgz
+charts/**/charts/
+
+# Local kubebuilder envtest assets cache
+/bin/k8s/
+
+# Temp artifacts
+*.tmp
+tmp/

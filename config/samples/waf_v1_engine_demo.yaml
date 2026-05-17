@@ -1,0 +1,13 @@
+apiVersion: waf.gtrfc.com/v1
+kind: Engine
+metadata:
+  name: demo-engine
+  namespace: coraza-demo
+spec:
+  ruleSetRef:
+    name: demo-ruleset
+  mode: Blocking
+  upstream:
+    url: http://example-upstream.coraza-demo.svc:80
+  listener:
+    port: 8080

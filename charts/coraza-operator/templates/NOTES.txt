@@ -1,0 +1,12 @@
+coraza-operator {{ .Chart.AppVersion }} installed in namespace {{ include "coraza-operator.namespace" . }}.
+
+Quick start — apply sample resources in your application namespace:
+
+  kubectl apply -f config/samples/waf_v1_secrules_baseline.yaml
+  kubectl apply -f config/samples/waf_v1_secrules_block_attack.yaml
+  kubectl apply -f config/samples/waf_v1_ruleset_demo.yaml
+  kubectl apply -f config/samples/waf_v1_engine_demo.yaml
+
+Wait for the engine to become ready:
+
+  kubectl get engines -n coraza-demo -w
