@@ -3,6 +3,13 @@
 Dieses Dokument sammelt offene Fragen vor Implementierungsstart. Jede Frage hat ein
 Antwortfeld. Bitte direkt darunter beantworten. Mehrfachauswahl und Freitext erlaubt.
 
+> **Stand 2026-08-19:** Die verbindlichen Betriebsziele und alle Architektur-Entscheidungen
+> stehen in [OPERATIONAL_TARGET.md](OPERATIONAL_TARGET.md) (Targets `T1`–`T10`,
+> Invarianten `I1`–`I6`). Bei Widerspruch gewinnt OPERATIONAL_TARGET.md.
+> Antworten unten sind entsprechend nachgetragen und mit ihrer Quelle markiert:
+> *Entschieden* (Design-Entscheidung), *Verifiziert im Repo* (Code existiert),
+> *Verifiziert upstream* (haproxy-ingress-Doku/-Template geprüft).
+
 ---
 
 ## 0. Projekt-Metadaten
@@ -39,6 +46,11 @@ Antwort: Der Operatior aggiert cluster-weit
 - RuleSet: namespaced
 - Engine: namespaced
 
+Nachtrag 2026-08-19 (T9): Engine bleibt namespaced und wird **in den Namespace der
+HAProxy-Instanz** deployt, die sie bedient. Bindung über `spec.ingressClassName`,
+nie über eine Team-Referenz. Zwei Engines mit derselben `ingressClassName` lehnt
+der Webhook ab.
+
 ### 1.4 Erlaubt das Modell Cross-Namespace-Referenzen (z. B. RuleSet in NS A referenziert SecRules in NS B)?
 Antwort: Nein. Aber RuleSet können ClusterSecRules integrieren.
 
@@ -58,7 +70,9 @@ Antwort: Go (kubebuilder/operator-sdk)
 ### 2.2 Framework?
 Optionen: kubebuilder | operator-sdk | controller-runtime direkt | andere
 
-Antwort: Offen, bitte schlage mir ein Framework vor und begründe kurz, warum du es für dieses Projekt für geeignet hältst.
+Antwort: kubebuilder (go.kubebuilder.io/v4). Verifiziert im Repo: [PROJECT](PROJECT)
+ist mit kubebuilder v4.14 gescaffoldet, `api/`, `config/`, `internal/controller/`
+folgen dem Layout. Entscheidung ist damit durch Implementierung gefallen.
 
 ### 2.3 Code-Generator / Schema-Validierung: OpenAPI v3, CEL-Validation-Rules, Webhook-Validierung?
 Antwort: OpenAPI v3
@@ -74,6 +88,12 @@ Antwort: Angular
 
 ### 2.7 Stats-Backend: Prometheus + Grafana embedded, eigener Time-Series-Store, beides?
 Antwort: eigene TimescaleDB, muss vom Plattform-Team seperat bereitgestellt werden.
+
+Nachtrag 2026-08-19 (Entschieden, T6/T7): **0.1.0 ist Prometheus-only.** Die
+TimescaleDB-Event-Pipeline ist auf später verschoben. Konsequenz: Dashboards und
+Alarme dürfen nur Fragen stellen, die Prometheus-Aggregate beantworten können;
+Einzelereignis-Sichten (Top-Angreifer-IPs, Audit-Browser, Forensik) sind bis dahin
+außer Scope und werden im Chart nicht versprochen.
 
 ---
 
@@ -133,7 +153,10 @@ Antwort: Hash reicht erstmal aus.
 Antwort: Ja, änderungen müssen zu einem reconcile aller abhängigen Engines führen.
 
 ### 4.6 Unterstützung für Include-Direktiven aus SecLang (verweisen auf andere Objekte)?
-Antwort:
+Antwort: Nein (Entschieden 2026-08-19, T4). `Include` steht auf der verbotenen
+Direktivenliste für Team-Regeln (Dateisystemzugriff aus dem Pod). Komposition
+passiert ausschließlich über `RuleSet.spec.sources`; Admin-Regeln werden
+Engine-seitig injiziert (`admin-pre → team → admin-post`).
 
 ---
 
@@ -153,13 +176,29 @@ Antwort:
 - `podDisruptionBudget`
 - `serviceType` (ClusterIP | LoadBalancer | NodePort)
 
-Antwort:
+Antwort (Entschieden 2026-08-19, T1/T8/T9 — siehe YAML-Skizze in OPERATIONAL_TARGET.md §T9):
+- **Neu:** `ingressClassName` (Pflicht — die Bindung an die HAProxy-Instanz),
+  `workload` (kind: Deployment|DaemonSet, replicas, affinity, tolerations,
+  nodeSelector, topologySpread, priorityClassName, PDB — T8; `replicas` bei
+  DaemonSet abgelehnt).
+- **Bleibt:** `type` (Plugin-Interface, 1.6), `mode`, `resources`, SPOA-Port,
+  `ruleSetRef` → wird zu `baselineRuleSetRef` (Admin-Basis, z. B. CRS).
+- **Entfällt:** `upstream` und `listener` (Reverse-Proxy-Modus gestrichen — SPOA
+  ist der einzige Datenpfad), `serviceType` (immer ClusterIP: SPOE ist
+  cluster-intern, ein LoadBalancer davor wäre ein Exposure-Fehler).
+- `tls` beschränkt sich auf Engine↔Operator-mTLS (bereits implementiert, §6.2);
+  Client-TLS liegt bei HAProxy (D1) und hat hier kein Feld.
 
 ### 5.2 Sollen Engines hinter einem Operator-managed Service erreichbar sein, oder erstellt Engine selbst Service/Ingress?
-Antwort:
+Antwort (Entschieden, T9): Operator erzeugt pro Engine einen ClusterIP-Service mit
+OwnerReference. Dessen Adresse ist genau das, was das Plattform-Team in
+`modsecurity-endpoints` (Global-Key, pro Controller-Instanz) einträgt. Die Engine
+erstellt nie einen Ingress — sie steht hinter HAProxy, nicht davor.
 
 ### 5.3 Engine-Container: eigenes Image bauen oder offizielles Coraza-Proxy-Image verwenden? Wenn eigenes, welche Basis (distroless, alpine, scratch)?
-Antwort:
+Antwort: Eigenes Image — verifiziert im Repo: [Dockerfile.engine](Dockerfile.engine),
+Engine-Code in [internal/enginepkg](internal/enginepkg) (Coraza als Library, SPOA
+via spop). Basis-Image-Wahl noch offen.
 
 ### 5.4 Hot-Reload-Verhalten: Wie reagiert die Engine auf RuleSet-Änderung?
 Optionen:
@@ -167,7 +206,11 @@ Optionen:
 - (b) Rolling-Restart des Deployments
 - (c) Blue/Green-Deployment
 
-Antwort:
+Antwort: (a), aber ohne Signal: die Engine hält einen gRPC-`Subscribe`-Stream zum
+Operator und tauscht bei jedem neuen Bundle die WAF-Instanz atomar in-process
+(verifiziert im Repo: [internal/enginepkg](internal/enginepkg), Reload-Tests).
+Kein Rolling-Restart — Invariante I4: atomar und connection-preserving, laufende
+SPOE-Verbindungen dürfen nicht abreißen.
 
 ### 5.5 Was passiert bei Engine-Konfig-Fehler nach Reload?
 Optionen:
@@ -175,7 +218,10 @@ Optionen:
 - (b) Engine bleibt mit alter Konfig, Status reportet Fehler
 - (c) Engine geht in CrashLoop
 
-Antwort:
+Antwort: (b) — folgt aus 3.3(b) und I4: ungültige Regeln erreichen die Engine gar
+nicht erst (Status `Invalid`, kein Reload); schlägt der Swap trotzdem fehl, bleibt
+die letzte gültige WAF-Instanz aktiv und der Fehler landet in den
+Engine-Conditions.
 
 ### 5.6 Soll Engine eine Health-/Readiness-Probe-Strategie vorgeben oder konfigurierbar machen?
 Antwort:
@@ -184,7 +230,13 @@ Antwort:
 Antwort:
 
 ### 5.8 Maximale Body-Größen, Timeouts, Connection-Limits — Defaults vs. konfigurierbar?
-Antwort:
+Antwort (teilweise, verifiziert upstream): Die harten Grenzen setzt HAProxy, nicht
+wir — `req.body` kommt puffergebunden über SPOE, und das Latenzbudget ist
+`modsecurity-timeout-processing` (Global, Default `1s`; dazu `-hello` 100ms,
+`-idle` 30s). Für ClamAV (T10) braucht das CR explizit `maxScanSize` +
+`onOversize: allow|deny`. Fail-open/fail-closed wird pro Engine konfigurierbar,
+Default fail-closed im Blocking-Mode (I6) — aktuell hardcoded fail-open in
+[internal/enginepkg/spoa.go](internal/enginepkg/spoa.go), muss vor T10 gefixt werden.
 
 ---
 
@@ -197,21 +249,35 @@ Optionen:
 - (c) Operator schreibt CR-Status, Engine watcht via Kube-API
 - (d) Sidecar im Engine-Pod, der konfiguriert
 
-Antwort:
+Antwort: (a) — verifiziert im Repo: Operator betreibt einen gRPC-Server
+([internal/grpcserver](internal/grpcserver)), Engines streamen Bundles über
+`rpc Subscribe(SubscribeRequest) returns (stream RuleSetBundle)`
+([proto/waf/v1](proto/waf/v1)).
 
 ### 6.2 Authentifizierung Engine ↔ Operator?
 Optionen: mTLS mit ServiceAccount-CA | Bearer-Token (SA-Projected) | SPIFFE/SPIRE
 
-Antwort:
+Antwort: mTLS mit operator-eigener CA — verifiziert im Repo: `Subscribe` erzwingt
+per Stream-Interceptor ein verifiziertes Client-Zertifikat, `Enroll` ist davon
+ausgenommen und dient dem Zertifikatsbezug
+([internal/grpcserver/server.go](internal/grpcserver/server.go)).
 
 ### 6.3 Push (Operator informiert) oder Pull (Engine fragt)?
-Antwort:
+Antwort: Push über den bestehenden `Subscribe`-Stream: die Engine abonniert einmal,
+der Operator schiebt bei jeder Neukompilierung ein neues Bundle (verifiziert im
+Repo, siehe 6.1).
 
 ### 6.4 Wie wird Konsistenz garantiert bei N Replicas einer Engine? Atomarer Switch oder eventually consistent?
-Antwort:
+Antwort: Atomar **pro Pod** (I4: kompletter WAF-Swap, nie partiell), über die
+Replicas hinweg eventually consistent — jede Replica hat ihren eigenen Stream.
+Sichtbarkeit über `status.appliedRuleSetHash`
+([api/v1/engine_types.go](api/v1/engine_types.go)); Fleet-weite Gleichzeitigkeit
+wird nicht versprochen und ist für Regelauswertung auch nicht nötig.
 
 ### 6.5 Bootstrap-Problem: Wie kommt die Engine beim ersten Start an Konfig, bevor sie Ready ist?
-Antwort:
+Antwort: Verifiziert im Repo: `Enroll`-RPC ist vom mTLS-Zwang ausgenommen — die
+Engine holt sich damit ihr Zertifikat, subscribed anschließend per mTLS und wird
+erst Ready, wenn das erste Bundle geladen ist.
 
 ### 6.6 Verschlüsselung sensibler Regelteile at-rest (etcd) — KMS-Encryption verlassen oder eigenes Sealing?
 Antwort:
@@ -227,16 +293,31 @@ Optionen:
 - (c) HAProxy → HTTP-Hook → Coraza
 - (d) Side-by-side, keine direkte Kopplung
 
-Antwort:
+Antwort: (b) — Entschieden 2026-08-19 (T1): SPOA ist der **einzige** Datenpfad,
+der Reverse-Proxy-Modus wird ersatzlos gestrichen (`spec.upstream`/`spec.listener`
+entfallen). Verifizierter SPOE-Vertrag: genau eine Message `coraza-req`, Event
+`on-backend-http-request`, Args wörtlich aus `modsecurity-args`, Var-Prefix
+`coraza` — Details in OPERATIONAL_TARGET.md §4.
 
 ### 7.2 Wird HAProxy vom selben Operator verwaltet oder existierend vorausgesetzt?
-Antwort:
+Antwort: Existierend vorausgesetzt (bestätigt 1.1). Die Global-Keys
+(`modsecurity-endpoints`, `modsecurity-use-coraza: true`, `modsecurity-args` inkl.
+`src` **append-only**, Timeouts) setzt das Plattform-Team pro Controller-Instanz;
+der Operator validiert und meldet Abweichungen als Condition, setzt sie aber nie
+selbst (T1, I2).
 
 ### 7.3 Soll der Operator HAProxy-Konfigurations-Snippets (Backend-Definition, SPOE-Config) generieren?
-Antwort:
+Antwort: Rendern ja, schreiben nie (I2). Team-seitige Annotationen (`waf`,
+`waf-mode`, `auth-tls-*` → D1, `allowlist-source-range` → D2) werden als
+Copy-Paste-Snippet in Doku/CR-Status ausgegeben; ihr Fehlen wird als Condition
+gemeldet. Der Operator hat **kein** Schreibrecht auf team-eigene
+Ingress-/Gateway-Objekte.
 
 ### 7.4 Gibt es ein bevorzugtes HAProxy-Deployment (HAProxy-Ingress, HAProxy-Kubernetes-Ingress, eigenes)?
-Antwort:
+Antwort: Entschieden (T1): [haproxy-ingress](https://haproxy-ingress.github.io/)
+(jcmoraisjr), unverändertes Original-Chart. Alles was der Operator emittiert, muss
+über dokumentierte Keys dieses Controllers konsumierbar sein. Mehrere Instanzen
+werden über je eine eigene Engine pro `ingressClassName` unterstützt (T9).
 
 ---
 
@@ -253,7 +334,9 @@ Optionen (Mehrfach):
 - (g) Konfig-Editor (CRDs anzeigen/editieren)
 - (h) Regel-Test-Playground
 
-Antwort:
+Antwort (eingeschränkt durch Prometheus-only-Entscheidung, 2.7): MVP maximal
+(a), (b), (d) — alles aggregat-basiert beantwortbar. (c), (e), (f) brauchen die
+verschobene Event-Pipeline und sind bis dahin außer Scope; nicht versprechen.
 
 ### 8.2 Authentifizierung des Frontends?
 Optionen: OIDC | kube-rbac-proxy | Basic-Auth | nur Cluster-intern (kein eigener Auth)
@@ -270,10 +353,14 @@ Optionen:
 - (c) Aggregator-Service im Operator
 - (d) Mischform
 
-Antwort:
+Antwort: (a) — folgt aus der Prometheus-only-Entscheidung (2.7). Wechsel auf (d)
+erst, wenn die TimescaleDB-Pipeline kommt.
 
 ### 8.5 Aufbewahrungsdauer für Stats (1h, 24h, 30d)? Wo gespeichert?
-Antwort:
+Antwort: 0.1.0: Retention des cluster-eigenen Prometheus, wir speichern nichts
+selbst. Langzeit-/Event-Retention ist eine TimescaleDB-Frage und mit ihr
+verschoben. Client-IPs sind personenbezogen und gehören in Events mit
+Retention-Policy, nie in Prometheus-Labels (T6, 10.8).
 
 ### 8.6 Multi-Tenancy-Anforderungen im Frontend (User sieht nur eigene Namespaces)?
 Antwort:
@@ -289,7 +376,11 @@ Antwort:
 Antwort:
 
 ### 9.2 Welche Engine-Metriken sind Pflicht (requests_total, blocked_total, latency_buckets, rule_hits)?
-Antwort:
+Antwort (T6): Basis existiert ([internal/enginepkg/metrics.go](internal/enginepkg/metrics.go),
+SPOA-Metriken). Ziel-Dimensionen: Ingress-Instanz, Namespace, Host, Path-Gruppe
+(normalisiert auf die Ingress-Pfadregel, nie Roh-URI), Rule-ID/-Tag,
+Anomaly-Score-Bucket, Action, Phase. Invariante I5: Kardinalität ist Budget —
+jedes neue Label braucht eine Schätzung im Ticket.
 
 ### 9.3 OpenTelemetry-Tracing-Unterstützung Pflicht oder optional?
 Antwort:
@@ -298,17 +389,27 @@ Antwort:
 Antwort:
 
 ### 9.5 Prometheus-ServiceMonitor und PodMonitor automatisch erzeugen?
-Antwort:
+Antwort: Per Chart-Toggle (analog T7: `monitoring.*.enabled`), nicht
+unconditionally — die ServiceMonitor-CRD existiert nur mit installiertem
+prometheus-operator. Noch nicht final entschieden.
 
 ### 9.6 Sollen Default-Grafana-Dashboards mitgeliefert werden?
-Antwort:
+Antwort: Ja — Entschieden (T7): Chart liefert PrometheusRule-Alarme (operational +
+security) und Grafana-Dashboards, toggle- und label-konfigurierbar. Regel: kein
+Dashboard erfindet eine Metrik, die der Operator nicht exportiert; Panels, die
+D2-vorgefilterten Traffic nicht sehen, sagen das in der Legende.
 
 ---
 
 ## 10. Security & Compliance
 
 ### 10.1 RBAC-Minimalprinzip: Welche Permissions soll der Operator-ServiceAccount maximal haben dürfen?
-Antwort:
+Antwort (I2, entschieden): Ingresses/Gateways clusterweit **nur** `get/list/watch` —
+niemals write auf team-eigene Objekte (kein field-level RBAC in Kubernetes ⇒
+Ingress-Write hieße Routing-Hijack-Fähigkeit). Schreibrechte nur auf eigene CRDs
+(+Status) und die selbst erzeugten Ressourcen (Deployments/DaemonSets, Services,
+Secrets für die CA) mit OwnerReferences. Ein Ticket, das mehr will, muss erst I2
+amendieren.
 
 ### 10.2 Pod-Security-Standards (restricted) für Engine- und Operator-Pods einhalten?
 Antwort:
@@ -329,7 +430,9 @@ Antwort:
 Antwort:
 
 ### 10.8 DSGVO/Audit-Aspekte: IP-Pseudonymisierung in Audit-Logs?
-Antwort:
+Antwort (Teilentscheidung, T6): Client-IPs erscheinen nie als Prometheus-Label.
+Vollständige Antwort (Pseudonymisierung, Retention) wird mit der verschobenen
+Event-Pipeline fällig — vor deren Design zu klären.
 
 ---
 
@@ -339,7 +442,10 @@ Antwort:
 Antwort:
 
 ### 11.2 Status-Subresource mit Conditions (Ready, Progressing, Degraded) standardisiert?
-Antwort:
+Antwort: Ja — bereits Projektregel ([CLAUDE.md](CLAUDE.md)): jedes Status-Update
+setzt alle drei Condition-Typen. `Degraded` trägt zusätzlich die neuen Fälle:
+verlorener Host-Claim (I1, mit Gewinner-Namespace), fehlende Global-Keys (T1),
+fehlendes `src` in `modsecurity-args` (T3).
 
 ### 11.3 Finalizers nutzen — wofür konkret (TLS-Cert-Cleanup, externe State-Cleanup)?
 Antwort:
@@ -474,11 +580,31 @@ Antwort:
 - [ ] Marketplace für RuleSets
 
 Was davon ist trotzdem MVP? Was fehlt?
-Antwort:
+Antwort (Stand 2026-08-19): Nichts davon rückt ins MVP vor. Es fehlt in der Liste:
+- **ClamAV-Scanning (T10)** — Ziel, aber nicht MVP; nur Request-Pfad. Verifiziert
+  upstream: das SPOE-Template kennt ausschließlich `on-backend-http-request`,
+  Response-/Egress-Scanning ist mit dem unveränderten Chart nicht lieferbar.
+- **Gateway-API-Support (T2)** — gewollt, Key-Abdeckung upstream noch unverifiziert.
+- Policy-as-Code (OPA/Kyverno) bleibt Roadmap; der Host-Claim-Ledger (I1) ist
+  bewusst operator-intern gelöst und hängt nicht davon ab.
 
 ---
 
 ## 19. Offene Punkte / Sonstiges
 
 Freitextfeld für alles, was hier noch nicht erfasst ist:
-Antwort:
+Antwort (offene Punkte, Stand 2026-08-19):
+- 1.1 nennt `ClusterRuleSet` als MVP-CRD — existiert im Code nicht
+  (api/v1 hat nur SecRules, ClusterSecRules, RuleSet, Engine). Klären: bauen oder
+  aus 1.1 streichen.
+- Team-Policy-CR (T2/T3: Ingress-Referenz, IP×Pfad×Methode, Exclusions) hat noch
+  keinen CRD-Namen — neues Kind oder Erweiterung von SecRules?
+- Stateful-Regeln (Rate-Limit, Brute-Force) zählen pro Pod, nicht fleet-weit —
+  harte Grenze ohne Shared Store, muss in die Doku (T4).
+- Fail-open→fail-closed-Fix ([internal/enginepkg/spoa.go](internal/enginepkg/spoa.go),
+  I6) ist Vorbedingung für T10.
+- Gateway-API-Verifikation (T2) steht aus.
+- Ticket-Reihenfolge: siehe OPERATIONAL_TARGET.md §6 (Ticket-Checkliste) und die
+  im Gespräch festgelegte Priorisierung: erst die drei offenen Löcher
+  (Compiler-Filter, fail-closed, `src`), dann Engine-API-Umbau, dann Host-Claim,
+  dann Inhalt (CRS, Metriken, Chart-Monitoring).
