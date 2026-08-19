@@ -9,9 +9,11 @@ env:
   GO_VERSION: '1.26.6'
   HELM_VERSION: 'v4.2.3'
   CHART_DIR: charts/coraza-operator
+  PAGES_URL: https://guided-traffic.github.io/coraza-operator/
 
 permissions:
   contents: write
+  pages: write
   id-token: write
   actions: read
   attestations: write
@@ -134,6 +136,7 @@ jobs:
     runs-on: self-hosted
     permissions:
       contents: write
+      pages: write
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -196,22 +199,51 @@ jobs:
           echo "chart_tgz=${CHART_TGZ}" >> $GITHUB_OUTPUT
           echo "Packaged ${CHART_TGZ}"
 
-      - name: Login to Docker Hub
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
-        with:
-          username: guidedtraffic
-          password: ${{ secrets.DOCKERHUB_PAT }}
-
-      # The chart is published as an OCI artifact next to the images rather than
-      # to a GitHub Pages Helm repo: this repository is private, and GitHub Pages
-      # is not available for private repositories on the current plan. Consumers
-      # install with:
-      #   helm install coraza-operator \
-      #     oci://registry-1.docker.io/guidedtraffic/coraza-operator --version X.Y.Z
-      - name: Push chart to Docker Hub (OCI)
+      # Published as a classic Helm repo on the gh-pages branch, matching the
+      # sister valkey-operator project:
+      #   helm repo add coraza-operator https://guided-traffic.github.io/coraza-operator/
+      #
+      # BOT_PAT is used instead of the persisted checkout credentials because the
+      # publish happens in a separate clone of the gh-pages branch. The token
+      # only ever appears in the remote URL, which Actions masks in logs.
+      - name: Publish chart to gh-pages
+        env:
+          BOT_PAT: ${{ secrets.BOT_PAT }}
+          CHART_TGZ: ${{ steps.package.outputs.chart_tgz }}
         run: |
           set -euo pipefail
-          helm push "${{ steps.package.outputs.chart_tgz }}" oci://registry-1.docker.io/guidedtraffic
+          REPO_URL="https://x-access-token:${BOT_PAT}@github.com/${GITHUB_REPOSITORY}.git"
+          WORK=/tmp/gh-pages
+          rm -rf "$WORK"
+
+          # gh-pages does not exist before the very first release: bootstrap it
+          # as an orphan branch instead of failing.
+          if git ls-remote --exit-code --heads "$REPO_URL" gh-pages >/dev/null 2>&1; then
+            git clone --branch gh-pages --single-branch --depth 1 "$REPO_URL" "$WORK"
+          else
+            echo "gh-pages branch not found - bootstrapping it"
+            git clone --depth 1 "$REPO_URL" "$WORK"
+            git -C "$WORK" checkout --orphan gh-pages
+            git -C "$WORK" rm -rf . >/dev/null 2>&1 || true
+          fi
+
+          cp "${GITHUB_WORKSPACE}/${CHART_TGZ}" "$WORK/"
+
+          cd "$WORK"
+          git config user.name "$GITHUB_ACTOR"
+          git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
+
+          # --merge keeps entries for previously released chart versions that are
+          # no longer present as local .tgz files.
+          if [ -f index.yaml ]; then
+            helm repo index . --url "${PAGES_URL}" --merge index.yaml
+          else
+            helm repo index . --url "${PAGES_URL}"
+          fi
+
+          git add --all
+          git commit -m "Release Helm chart for ${GITHUB_REF_NAME}"
+          git push origin gh-pages
 
       - name: Attach chart to release
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2

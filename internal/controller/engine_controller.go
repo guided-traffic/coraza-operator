@@ -47,10 +47,10 @@ import (
 // EngineReconciler reconciles an Engine object.
 type EngineReconciler struct {
 	client.Client
-	Scheme           *runtime.Scheme
-	Store            *rulestore.Store // may be nil in tests that don't exercise store
-	OperatorGRPCAddr string           // e.g. "coraza-operator-grpc.coraza-system.svc:9443"
-	DefaultEngineImage string         // overrides engineassets.DefaultEngineImage when non-empty
+	Scheme             *runtime.Scheme
+	Store              *rulestore.Store // may be nil in tests that don't exercise store
+	OperatorGRPCAddr   string           // e.g. "coraza-operator-grpc.coraza-system.svc:9443"
+	DefaultEngineImage string           // overrides engineassets.DefaultEngineImage when non-empty
 }
 
 // +kubebuilder:rbac:groups=waf.gtrfc.com,resources=engines,verbs=get;list;watch;create;update;patch;delete
@@ -68,8 +68,6 @@ type EngineReconciler struct {
 
 // Reconcile implements the reconciliation loop for Engine.
 func (r *EngineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	log := logf.FromContext(ctx)
-
 	var engine wafv1.Engine
 	if err := r.Get(ctx, req.NamespacedName, &engine); err != nil {
 		if apierrors.IsNotFound(err) {
@@ -85,129 +83,178 @@ func (r *EngineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	rsKey := types.NamespacedName{Namespace: engine.Namespace, Name: engine.Spec.RuleSetRef.Name}
 	if err := r.Get(ctx, rsKey, &ruleset); err != nil {
 		if apierrors.IsNotFound(err) {
-			msg := fmt.Sprintf("RuleSet %s/%s not found", engine.Namespace, engine.Spec.RuleSetRef.Name)
-			log.Info(msg)
-			setConditionDegraded(&statusPatch.Status.Conditions, engine.Generation, wafv1.ReasonDependencyMissing, msg)
-			clearCondition(&statusPatch.Status.Conditions, wafv1.ConditionReady)
-			clearCondition(&statusPatch.Status.Conditions, wafv1.ConditionProgressing)
-			return r.patchEngineStatusIfChanged(ctx, log, &engine, statusPatch)
+			return r.markRuleSetMissing(ctx, &engine, statusPatch)
 		}
 		return ctrl.Result{}, fmt.Errorf("get RuleSet %s: %w", rsKey, err)
 	}
 
 	// Step 2: wait for RuleSet to be compiled.
 	if ruleset.Status.CompiledHash == "" {
-		log.Info("RuleSet not yet compiled, requeueing", "ruleset", rsKey)
-		meta.SetStatusCondition(&statusPatch.Status.Conditions, metav1.Condition{
-			Type:               wafv1.ConditionProgressing,
-			Status:             metav1.ConditionTrue,
-			Reason:             "WaitingForRuleSetCompilation",
-			Message:            fmt.Sprintf("waiting for RuleSet %s to be compiled", engine.Spec.RuleSetRef.Name),
-			ObservedGeneration: engine.Generation,
-		})
-		clearCondition(&statusPatch.Status.Conditions, wafv1.ConditionReady)
-		if _, err := r.patchEngineStatusIfChanged(ctx, log, &engine, statusPatch); err != nil {
-			return ctrl.Result{}, err
-		}
-		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+		return r.markAwaitingCompilation(ctx, &engine, statusPatch, rsKey)
 	}
 
 	// Step 3: compile the full SecLang bundle for the ConfigMap.
 	bundle, err := compileRuleSet(ctx, r.Client, engine.Namespace, &ruleset)
 	if err != nil {
-		msg := fmt.Sprintf("compile RuleSet %s: %v", rsKey, err)
-		log.Error(err, "failed to compile RuleSet for engine")
-		setConditionDegraded(&statusPatch.Status.Conditions, engine.Generation, wafv1.ReasonDependencyMissing, msg)
-		clearCondition(&statusPatch.Status.Conditions, wafv1.ConditionReady)
-		clearCondition(&statusPatch.Status.Conditions, wafv1.ConditionProgressing)
-		if _, patchErr := r.patchEngineStatusIfChanged(ctx, log, &engine, statusPatch); patchErr != nil {
-			return ctrl.Result{}, patchErr
+		return r.markCompileFailed(ctx, &engine, statusPatch, rsKey, err)
+	}
+
+	// Steps 4-6: build the owned objects and apply them.
+	if err := r.applyOwnedObjects(ctx, &engine, bundle); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	// Steps 7-8: read back the Deployment and publish the resulting status.
+	return r.reconcileStatus(ctx, &engine, statusPatch, &ruleset, bundle)
+}
+
+// markRuleSetMissing records that the referenced RuleSet does not exist. No
+// requeue is scheduled: the RuleSet watch re-triggers this Engine once it appears.
+func (r *EngineReconciler) markRuleSetMissing(
+	ctx context.Context,
+	engine *wafv1.Engine,
+	statusPatch *wafv1.Engine,
+) (ctrl.Result, error) {
+	log := logf.FromContext(ctx)
+
+	msg := fmt.Sprintf("RuleSet %s/%s not found", engine.Namespace, engine.Spec.RuleSetRef.Name)
+	log.Info(msg)
+	setConditionDegraded(&statusPatch.Status.Conditions, engine.Generation, wafv1.ReasonDependencyMissing, msg)
+	clearCondition(&statusPatch.Status.Conditions, wafv1.ConditionReady)
+	clearCondition(&statusPatch.Status.Conditions, wafv1.ConditionProgressing)
+	return r.patchEngineStatusIfChanged(ctx, log, engine, statusPatch)
+}
+
+// markAwaitingCompilation records that the RuleSet exists but has not been
+// compiled yet, and retries shortly.
+func (r *EngineReconciler) markAwaitingCompilation(
+	ctx context.Context,
+	engine *wafv1.Engine,
+	statusPatch *wafv1.Engine,
+	rsKey types.NamespacedName,
+) (ctrl.Result, error) {
+	log := logf.FromContext(ctx)
+
+	log.Info("RuleSet not yet compiled, requeueing", "ruleset", rsKey)
+	meta.SetStatusCondition(&statusPatch.Status.Conditions, metav1.Condition{
+		Type:               wafv1.ConditionProgressing,
+		Status:             metav1.ConditionTrue,
+		Reason:             "WaitingForRuleSetCompilation",
+		Message:            fmt.Sprintf("waiting for RuleSet %s to be compiled", engine.Spec.RuleSetRef.Name),
+		ObservedGeneration: engine.Generation,
+	})
+	clearCondition(&statusPatch.Status.Conditions, wafv1.ConditionReady)
+	if _, err := r.patchEngineStatusIfChanged(ctx, log, engine, statusPatch); err != nil {
+		return ctrl.Result{}, err
+	}
+	return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+}
+
+// markCompileFailed records a compilation failure. The engine keeps running with
+// whatever rules it already has; only the status reflects the failure.
+func (r *EngineReconciler) markCompileFailed(
+	ctx context.Context,
+	engine *wafv1.Engine,
+	statusPatch *wafv1.Engine,
+	rsKey types.NamespacedName,
+	compileErr error,
+) (ctrl.Result, error) {
+	log := logf.FromContext(ctx)
+
+	msg := fmt.Sprintf("compile RuleSet %s: %v", rsKey, compileErr)
+	log.Error(compileErr, "failed to compile RuleSet for engine")
+	setConditionDegraded(&statusPatch.Status.Conditions, engine.Generation, wafv1.ReasonDependencyMissing, msg)
+	clearCondition(&statusPatch.Status.Conditions, wafv1.ConditionReady)
+	clearCondition(&statusPatch.Status.Conditions, wafv1.ConditionProgressing)
+	if _, patchErr := r.patchEngineStatusIfChanged(ctx, log, engine, statusPatch); patchErr != nil {
+		return ctrl.Result{}, patchErr
+	}
+	return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+}
+
+// ownedObject pairs an object the Engine owns with the mutation that brings it
+// to the desired state.
+type ownedObject struct {
+	kind   string
+	obj    client.Object
+	mutate controllerutil.MutateFn
+}
+
+// applyOwnedObjects builds the ServiceAccount, ConfigMap, Deployment and Service
+// for the Engine, stamps owner references on them so GC cleans up on Engine
+// deletion, and creates or patches each one.
+func (r *EngineReconciler) applyOwnedObjects(
+	ctx context.Context,
+	engine *wafv1.Engine,
+	bundle *compiler.Bundle,
+) error {
+	desiredCM := engineassets.BuildRulesConfigMap(engine, bundle.Compiled)
+	desiredDep := engineassets.BuildDeployment(engine, bundle.SHA256, r.OperatorGRPCAddr, r.DefaultEngineImage)
+	desiredSvc := engineassets.BuildService(engine)
+	desiredSA := engineassets.BuildServiceAccount(engine)
+
+	for _, obj := range []client.Object{desiredSA, desiredCM, desiredDep, desiredSvc} {
+		if err := controllerutil.SetControllerReference(engine, obj, r.Scheme); err != nil {
+			return fmt.Errorf("set owner reference on %T: %w", obj, err)
 		}
-		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 	}
 
-	appliedHash := bundle.SHA256
+	existingSA := &corev1.ServiceAccount{}
+	existingSA.Name, existingSA.Namespace = desiredSA.Name, desiredSA.Namespace
+	existingCM := &corev1.ConfigMap{}
+	existingCM.Name, existingCM.Namespace = desiredCM.Name, desiredCM.Namespace
+	existingDep := &appsv1.Deployment{}
+	existingDep.Name, existingDep.Namespace = desiredDep.Name, desiredDep.Namespace
+	existingSvc := &corev1.Service{}
+	existingSvc.Name, existingSvc.Namespace = desiredSvc.Name, desiredSvc.Namespace
 
-	// Step 4: build desired objects.
-	desiredCM := engineassets.BuildRulesConfigMap(&engine, bundle.Compiled)
-	desiredDep := engineassets.BuildDeployment(&engine, appliedHash, r.OperatorGRPCAddr, r.DefaultEngineImage)
-	desiredSvc := engineassets.BuildService(&engine)
-	desiredSA := engineassets.BuildServiceAccount(&engine)
-
-	// Step 5: set owner references so GC cleans up on Engine deletion.
-	if err := controllerutil.SetControllerReference(&engine, desiredCM, r.Scheme); err != nil {
-		return ctrl.Result{}, fmt.Errorf("set owner reference on ConfigMap: %w", err)
-	}
-	if err := controllerutil.SetControllerReference(&engine, desiredDep, r.Scheme); err != nil {
-		return ctrl.Result{}, fmt.Errorf("set owner reference on Deployment: %w", err)
-	}
-	if err := controllerutil.SetControllerReference(&engine, desiredSvc, r.Scheme); err != nil {
-		return ctrl.Result{}, fmt.Errorf("set owner reference on Service: %w", err)
-	}
-	if err := controllerutil.SetControllerReference(&engine, desiredSA, r.Scheme); err != nil {
-		return ctrl.Result{}, fmt.Errorf("set owner reference on ServiceAccount: %w", err)
+	// Order matters: the ServiceAccount and ConfigMap must exist before the
+	// Deployment that mounts them.
+	owned := []ownedObject{
+		{"ServiceAccount", existingSA, func() error { return mutateSA(desiredSA, existingSA) }},
+		{"ConfigMap", existingCM, func() error { return mutateConfigMap(desiredCM, existingCM) }},
+		{"Deployment", existingDep, func() error { return mutateDeployment(desiredDep, existingDep) }},
+		{"Service", existingSvc, func() error { return mutateService(desiredSvc, existingSvc) }},
 	}
 
-	// Step 5a: CreateOrPatch ServiceAccount.
-	var existingSA corev1.ServiceAccount
-	existingSA.Name = desiredSA.Name
-	existingSA.Namespace = desiredSA.Namespace
-	saResult, err := controllerutil.CreateOrPatch(ctx, r.Client, &existingSA, func() error {
-		return mutateSA(desiredSA, &existingSA)
-	})
+	for _, o := range owned {
+		if err := r.applyOwnedObject(ctx, o); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// applyOwnedObject creates or patches a single owned object and logs it only
+// when it actually changed, so a steady-state reconcile stays silent.
+func (r *EngineReconciler) applyOwnedObject(ctx context.Context, o ownedObject) error {
+	result, err := controllerutil.CreateOrPatch(ctx, r.Client, o.obj, o.mutate)
 	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("reconcile ServiceAccount %s/%s: %w", desiredSA.Namespace, desiredSA.Name, err)
+		return fmt.Errorf("reconcile %s %s/%s: %w", o.kind, o.obj.GetNamespace(), o.obj.GetName(), err)
 	}
-	if saResult != controllerutil.OperationResultNone {
-		log.Info("ServiceAccount reconciled", "result", saResult, "name", existingSA.Name)
+	if result != controllerutil.OperationResultNone {
+		logf.FromContext(ctx).Info(o.kind+" reconciled", "result", result, "name", o.obj.GetName())
 	}
+	return nil
+}
 
-	// Step 6a: CreateOrPatch ConfigMap.
-	var existingCM corev1.ConfigMap
-	existingCM.Name = desiredCM.Name
-	existingCM.Namespace = desiredCM.Namespace
-	cmResult, err := controllerutil.CreateOrPatch(ctx, r.Client, &existingCM, func() error {
-		return mutateConfigMap(desiredCM, &existingCM)
-	})
-	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("reconcile ConfigMap %s/%s: %w", desiredCM.Namespace, desiredCM.Name, err)
-	}
-	if cmResult != controllerutil.OperationResultNone {
-		log.Info("ConfigMap reconciled", "result", cmResult, "name", existingCM.Name)
-	}
+// reconcileStatus reads the Deployment back, writes the Engine status and
+// publishes the bundle once the status patch succeeded.
+func (r *EngineReconciler) reconcileStatus(
+	ctx context.Context,
+	engine *wafv1.Engine,
+	statusPatch *wafv1.Engine,
+	ruleset *wafv1.RuleSet,
+	bundle *compiler.Bundle,
+) (ctrl.Result, error) {
+	log := logf.FromContext(ctx)
 
-	// Step 6b: CreateOrPatch Deployment.
-	var existingDep appsv1.Deployment
-	existingDep.Name = desiredDep.Name
-	existingDep.Namespace = desiredDep.Namespace
-	depResult, err := controllerutil.CreateOrPatch(ctx, r.Client, &existingDep, func() error {
-		return mutateDeployment(desiredDep, &existingDep)
-	})
-	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("reconcile Deployment %s/%s: %w", desiredDep.Namespace, desiredDep.Name, err)
-	}
-	if depResult != controllerutil.OperationResultNone {
-		log.Info("Deployment reconciled", "result", depResult, "name", existingDep.Name)
-	}
+	depName := engineassets.DeploymentName(engine)
 
-	// Step 6c: CreateOrPatch Service.
-	var existingSvc corev1.Service
-	existingSvc.Name = desiredSvc.Name
-	existingSvc.Namespace = desiredSvc.Namespace
-	svcResult, err := controllerutil.CreateOrPatch(ctx, r.Client, &existingSvc, func() error {
-		return mutateService(desiredSvc, &existingSvc)
-	})
-	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("reconcile Service %s/%s: %w", desiredSvc.Namespace, desiredSvc.Name, err)
-	}
-	if svcResult != controllerutil.OperationResultNone {
-		log.Info("Service reconciled", "result", svcResult, "name", existingSvc.Name)
-	}
-
-	// Step 7: read back Deployment status.
 	var currentDep appsv1.Deployment
-	if err := r.Get(ctx, types.NamespacedName{Namespace: engine.Namespace, Name: engineassets.DeploymentName(&engine)}, &currentDep); err != nil {
-		return ctrl.Result{}, fmt.Errorf("get Deployment %s after apply: %w", engineassets.DeploymentName(&engine), err)
+	if err := r.Get(ctx, types.NamespacedName{Namespace: engine.Namespace, Name: depName}, &currentDep); err != nil {
+		return ctrl.Result{}, fmt.Errorf("get Deployment %s after apply: %w", depName, err)
 	}
 
 	readyReplicas := currentDep.Status.ReadyReplicas
@@ -216,66 +263,75 @@ func (r *EngineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		desiredReplicas = *engine.Spec.Replicas
 	}
 
-	// Step 8: set status fields.
 	statusPatch.Status.ObservedGeneration = engine.Generation
-	statusPatch.Status.AppliedRuleSetHash = appliedHash
+	statusPatch.Status.AppliedRuleSetHash = bundle.SHA256
 	statusPatch.Status.ReadyReplicas = readyReplicas
 
-	if readyReplicas == desiredReplicas {
-		meta.SetStatusCondition(&statusPatch.Status.Conditions, metav1.Condition{
+	rollingOut := readyReplicas != desiredReplicas
+	setRolloutConditions(&statusPatch.Status.Conditions, engine.Generation, readyReplicas, desiredReplicas)
+
+	result, patchErr := r.patchEngineStatusIfChanged(ctx, log, engine, statusPatch)
+	if patchErr != nil {
+		return ctrl.Result{}, patchErr
+	}
+	r.publishBundle(engine.Namespace, engine.Name, ruleset.Name, bundle)
+
+	if rollingOut {
+		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+	}
+	return result, nil
+}
+
+// setRolloutConditions writes the Ready/Progressing/Degraded triple describing
+// the Deployment rollout. All three are always set together so no stale
+// condition survives a state change.
+func setRolloutConditions(conds *[]metav1.Condition, generation int64, ready, desired int32) {
+	if ready == desired {
+		meta.SetStatusCondition(conds, metav1.Condition{
 			Type:               wafv1.ConditionReady,
 			Status:             metav1.ConditionTrue,
 			Reason:             wafv1.ReasonReconciled,
 			Message:            "engine deployment is ready",
-			ObservedGeneration: engine.Generation,
+			ObservedGeneration: generation,
 		})
-		meta.SetStatusCondition(&statusPatch.Status.Conditions, metav1.Condition{
+		meta.SetStatusCondition(conds, metav1.Condition{
 			Type:               wafv1.ConditionProgressing,
 			Status:             metav1.ConditionFalse,
 			Reason:             wafv1.ReasonReconciled,
-			ObservedGeneration: engine.Generation,
+			ObservedGeneration: generation,
 		})
-		meta.SetStatusCondition(&statusPatch.Status.Conditions, metav1.Condition{
+		meta.SetStatusCondition(conds, metav1.Condition{
 			Type:               wafv1.ConditionDegraded,
 			Status:             metav1.ConditionFalse,
 			Reason:             wafv1.ReasonReconciled,
-			ObservedGeneration: engine.Generation,
+			ObservedGeneration: generation,
 		})
-		result, patchErr := r.patchEngineStatusIfChanged(ctx, log, &engine, statusPatch)
-		if patchErr != nil {
-			return ctrl.Result{}, patchErr
-		}
-		r.publishBundle(engine.Namespace, engine.Name, ruleset.Name, bundle)
-		return result, nil
+		return
 	}
 
-	// Rollout in progress.
-	meta.SetStatusCondition(&statusPatch.Status.Conditions, metav1.Condition{
+	const reason = "DeploymentRollingOut"
+	msg := fmt.Sprintf("%d/%d replicas ready", ready, desired)
+
+	meta.SetStatusCondition(conds, metav1.Condition{
 		Type:               wafv1.ConditionReady,
 		Status:             metav1.ConditionFalse,
-		Reason:             "DeploymentRollingOut",
-		Message:            fmt.Sprintf("%d/%d replicas ready", readyReplicas, desiredReplicas),
-		ObservedGeneration: engine.Generation,
+		Reason:             reason,
+		Message:            msg,
+		ObservedGeneration: generation,
 	})
-	meta.SetStatusCondition(&statusPatch.Status.Conditions, metav1.Condition{
+	meta.SetStatusCondition(conds, metav1.Condition{
 		Type:               wafv1.ConditionProgressing,
 		Status:             metav1.ConditionTrue,
-		Reason:             "DeploymentRollingOut",
-		Message:            fmt.Sprintf("%d/%d replicas ready", readyReplicas, desiredReplicas),
-		ObservedGeneration: engine.Generation,
+		Reason:             reason,
+		Message:            msg,
+		ObservedGeneration: generation,
 	})
-	meta.SetStatusCondition(&statusPatch.Status.Conditions, metav1.Condition{
+	meta.SetStatusCondition(conds, metav1.Condition{
 		Type:               wafv1.ConditionDegraded,
 		Status:             metav1.ConditionFalse,
-		Reason:             "DeploymentRollingOut",
-		ObservedGeneration: engine.Generation,
+		Reason:             reason,
+		ObservedGeneration: generation,
 	})
-
-	if _, err := r.patchEngineStatusIfChanged(ctx, log, &engine, statusPatch); err != nil {
-		return ctrl.Result{}, err
-	}
-	r.publishBundle(engine.Namespace, engine.Name, ruleset.Name, bundle)
-	return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 }
 
 // publishBundle publishes the compiled bundle to the rulestore if a Store is wired.

@@ -146,10 +146,17 @@ coverage-json: ## Generate the shields.io coverage badge JSON from $(COVERAGE_DI
 
 ##@ Security
 
+# -exclude-generated skips proto/waf/v1/*.pb.go (generated unsafe pointer use).
+# -exclude-dir=test skips the e2e scaffolding in test/utils, which shells out to
+# kubectl/make by design; it is never built into a shipped binary.
+# -nosec-require-rules forces every #nosec annotation to name the rule it waives,
+# so a blanket "#nosec" cannot silently disable the whole scanner for a line.
 .PHONY: gosec
 gosec: ## Run the gosec security scanner.
 	@command -v gosec >/dev/null 2>&1 || go install github.com/securego/gosec/v2/cmd/gosec@$(GOSEC_VERSION)
-	GOFLAGS="-buildvcs=false -p=$(GOSEC_CONCURRENCY)" GOMEMLIMIT=$(GOSEC_MEMLIMIT) gosec -concurrency=$(GOSEC_CONCURRENCY) ./...
+	GOFLAGS="-buildvcs=false -p=$(GOSEC_CONCURRENCY)" GOMEMLIMIT=$(GOSEC_MEMLIMIT) \
+		gosec -concurrency=$(GOSEC_CONCURRENCY) \
+			-exclude-generated -exclude-dir=test -nosec-require-rules ./...
 
 .PHONY: vuln
 vuln: ## Check dependencies and stdlib for known vulnerabilities.

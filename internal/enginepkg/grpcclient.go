@@ -71,7 +71,9 @@ const (
 //
 // It runs until ctx is cancelled. On any stream error it reconnects with
 // exponential backoff (initial 1s, max 30s).
-func SubscribeConfig(ctx context.Context, cfg GRPCClientConfig, onBundle func(Bundle), logger logr.Logger) error {
+func SubscribeConfig(ctx context.Context, cfg GRPCClientConfig, onBundle func(Bundle)) error {
+	logger := logr.FromContextOrDiscard(ctx)
+
 	const (
 		initialBackoff = 1 * time.Second
 		maxBackoff     = 30 * time.Second
@@ -84,7 +86,7 @@ func SubscribeConfig(ctx context.Context, cfg GRPCClientConfig, onBundle func(Bu
 			return nil
 		}
 
-		err := runSubscribeLoop(ctx, cfg, onBundle, logger)
+		err := runSubscribeLoop(ctx, cfg, onBundle)
 		if err == nil || ctx.Err() != nil {
 			return nil
 		}
@@ -106,9 +108,9 @@ func SubscribeConfig(ctx context.Context, cfg GRPCClientConfig, onBundle func(Bu
 
 // runSubscribeLoop ensures a client cert is enrolled, then subscribes once.
 // Returns nil on clean context cancellation.
-func runSubscribeLoop(ctx context.Context, cfg GRPCClientConfig, onBundle func(Bundle), logger logr.Logger) error {
+func runSubscribeLoop(ctx context.Context, cfg GRPCClientConfig, onBundle func(Bundle)) error {
 	// Ensure we have a client cert + CA cert enrolled before subscribing.
-	if err := ensureEnrolled(ctx, cfg, logger); err != nil {
+	if err := ensureEnrolled(ctx, cfg); err != nil {
 		return fmt.Errorf("enrollment: %w", err)
 	}
 
@@ -117,12 +119,14 @@ func runSubscribeLoop(ctx context.Context, cfg GRPCClientConfig, onBundle func(B
 		return fmt.Errorf("build client TLS: %w", err)
 	}
 
-	return runStream(ctx, cfg, onBundle, logger, tlsCfg)
+	return runStream(ctx, cfg, onBundle, tlsCfg)
 }
 
 // ensureEnrolled checks whether a valid client cert already exists on disk.
 // If not, it performs the Enroll RPC and persists the received cert, key, and CA cert.
-func ensureEnrolled(ctx context.Context, cfg GRPCClientConfig, logger logr.Logger) error {
+func ensureEnrolled(ctx context.Context, cfg GRPCClientConfig) error {
+	logger := logr.FromContextOrDiscard(ctx)
+
 	certPath := filepath.Join(cfg.CertDir, clientCertFile)
 	keyPath := filepath.Join(cfg.CertDir, clientKeyFile)
 	caPath := filepath.Join(cfg.CertDir, caCertFile)
@@ -162,15 +166,21 @@ func ensureEnrolled(ctx context.Context, cfg GRPCClientConfig, logger logr.Logge
 	}
 
 	// Dial the operator for Enroll.
-	// SECURITY NOTE: During bootstrap, the engine does not yet have the CA cert,
-	// so it cannot verify the operator's server cert. We use InsecureSkipVerify
-	// ONLY for the Enroll RPC. After Enroll, we persist the CA cert and all
-	// subsequent connections (Subscribe) use proper cert verification.
+	// SECURITY NOTE: During bootstrap the engine does not yet have the CA cert,
+	// so it cannot verify the operator's server cert. InsecureSkipVerify is used
+	// ONLY for the Enroll RPC. After Enroll the CA cert is persisted and every
+	// subsequent connection (Subscribe) verifies the server cert properly. This
+	// mirrors the kubelet TLS bootstrap pattern.
 	//
-	// This is intentional and the same pattern used by kubelet TLS bootstrap.
-	// Mitigation: the Enroll response is authenticated server-side via TokenReview;
-	// even if a MITM intercepts the Enroll, it cannot obtain a valid SA token.
+	// RESIDUAL RISK: the SA token is sent over this unverified channel. An
+	// attacker able to MITM the engine->operator path during bootstrap reads the
+	// token and can replay it to the real operator to enrol as this engine.
+	// Server-side TokenReview authenticates the token, it does not protect the
+	// token in transit. Closing this requires the CA bundle to be delivered to
+	// the engine out of band (e.g. mounted from the operator's CA secret) so the
+	// Enroll connection can be verified like any other.
 	enrollTLS := &tls.Config{
+		// #nosec G402 -- bootstrap-only, see the SECURITY NOTE above.
 		InsecureSkipVerify: true, //nolint:gosec // bootstrap-only; see comment above
 		MinVersion:         tls.VersionTLS13,
 	}
@@ -182,7 +192,7 @@ func ensureEnrolled(ctx context.Context, cfg GRPCClientConfig, logger logr.Logge
 	if err != nil {
 		return fmt.Errorf("dial operator for enroll %s: %w", cfg.OperatorAddr, err)
 	}
-	defer enrollConn.Close()
+	defer func() { _ = enrollConn.Close() }()
 
 	enrollClient := wafv1pb.NewConfigServiceClient(enrollConn)
 	resp, err := enrollClient.Enroll(ctx, &wafv1pb.EnrollRequest{
@@ -230,6 +240,7 @@ func buildClientTLS(cfg GRPCClientConfig) (*tls.Config, error) {
 		return nil, fmt.Errorf("load client key pair: %w", err)
 	}
 
+	// #nosec G304 -- caPath is derived from cfg.CertDir, an operator-supplied path.
 	caPEM, err := os.ReadFile(caPath)
 	if err != nil {
 		return nil, fmt.Errorf("read CA cert %s: %w", caPath, err)
@@ -249,7 +260,9 @@ func buildClientTLS(cfg GRPCClientConfig) (*tls.Config, error) {
 
 // runStream dials the operator with mTLS, subscribes, and receives bundles until
 // the stream ends or ctx is cancelled. Returns nil on clean context cancellation.
-func runStream(ctx context.Context, cfg GRPCClientConfig, onBundle func(Bundle), logger logr.Logger, tlsCfg *tls.Config) error {
+func runStream(ctx context.Context, cfg GRPCClientConfig, onBundle func(Bundle), tlsCfg *tls.Config) error {
+	logger := logr.FromContextOrDiscard(ctx)
+
 	var dialOpt grpc.DialOption
 	if tlsCfg != nil {
 		dialOpt = grpc.WithTransportCredentials(credentials.NewTLS(tlsCfg))
@@ -261,7 +274,7 @@ func runStream(ctx context.Context, cfg GRPCClientConfig, onBundle func(Bundle),
 	if err != nil {
 		return fmt.Errorf("dial %s: %w", cfg.OperatorAddr, err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	client := wafv1pb.NewConfigServiceClient(conn)
 
@@ -302,11 +315,16 @@ func fileExists(path string) bool {
 // writeFile writes data to path with the given permission bits.
 // It creates the file if it does not exist and truncates it if it does.
 func writeFile(path string, data []byte, mode os.FileMode) error {
+	// #nosec G304 -- path is derived from cfg.CertDir, an operator-supplied path.
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, mode)
 	if err != nil {
 		return err
 	}
-	defer f.Close()
-	_, err = f.Write(data)
-	return err
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		return err
+	}
+	// The Close error is returned rather than dropped: these files hold the
+	// client key and cert, and a failed flush would leave them truncated.
+	return f.Close()
 }

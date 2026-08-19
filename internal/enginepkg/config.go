@@ -125,6 +125,7 @@ func FromEnv() (Config, error) {
 
 	saTokenPath := os.Getenv("ENGINE_SA_TOKEN")
 	if saTokenPath == "" {
+		// #nosec G101 -- the default mount path of the token file, not a credential.
 		saTokenPath = "/var/run/secrets/coraza/token"
 	}
 

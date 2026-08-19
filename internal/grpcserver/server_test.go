@@ -69,9 +69,9 @@ func setup(t *testing.T) (wafv1pb.ConfigServiceClient, *rulestore.Store, context
 	require.NoError(t, err)
 
 	cancel := func() {
-		conn.Close()
+		_ = conn.Close()
 		grpcSrv.GracefulStop()
-		lis.Close()
+		_ = lis.Close()
 	}
 
 	return wafv1pb.NewConfigServiceClient(conn), store, cancel
@@ -142,8 +142,7 @@ func TestSubscribe_ReceivesPublishedBundle(t *testing.T) {
 	client, store, cancel := setup(t)
 	defer cancel()
 
-	ctx, ctxCancel := context.WithCancel(context.Background())
-	defer ctxCancel()
+	ctx := t.Context()
 
 	stream, err := client.Subscribe(ctx, &wafv1pb.SubscribeRequest{
 		EngineNamespace: "ns1",
@@ -171,8 +170,7 @@ func TestSubscribe_ReceivesInitialBundleBeforeSubscribe(t *testing.T) {
 	// Publish before subscribing.
 	store.Publish("ns1", "e1", bundle("pre-existing"))
 
-	ctx, ctxCancel := context.WithCancel(context.Background())
-	defer ctxCancel()
+	ctx := t.Context()
 
 	stream, err := client.Subscribe(ctx, &wafv1pb.SubscribeRequest{
 		EngineNamespace: "ns1",

@@ -57,8 +57,10 @@ const (
 	rulesVolumeName           = "coraza-rules"
 
 	// SATokenVolumeName is the projected ServiceAccount token volume name.
+	// #nosec G101 -- a Kubernetes volume name, not a credential.
 	SATokenVolumeName = "coraza-sa-token"
 	// SATokenMountPath is where the projected SA token is mounted.
+	// #nosec G101 -- a mount path, not a credential.
 	SATokenMountPath = "/var/run/secrets/coraza"
 	// SATokenFile is the full path to the projected SA token file.
 	SATokenFile = SATokenMountPath + "/token"
@@ -295,8 +297,8 @@ func BuildDeployment(engine *wafv1.Engine, appliedRuleSetHash, operatorGRPCAddr,
 							Image:           image,
 							ImagePullPolicy: corev1.PullAlways,
 							Ports:           buildContainerPorts(port, engine.Spec.Listener.SPOAPort),
-							Env:       envVars,
-							Resources: engine.Spec.Resources,
+							Env:             envVars,
+							Resources:       engine.Spec.Resources,
 							VolumeMounts: []corev1.VolumeMount{
 								{
 									Name:      rulesVolumeName,

@@ -104,8 +104,11 @@ func buildCA(t *testing.T) *pki.CertAuthority {
 }
 
 // buildCSR generates a fresh ECDSA P-256 key, builds a CSR, and returns (csrDER, privateKey).
-func buildCSR(t *testing.T, cn string) (csrDER []byte, priv *ecdsa.PrivateKey) {
+func buildCSR(t *testing.T) (csrDER []byte, priv *ecdsa.PrivateKey) {
 	t.Helper()
+
+	// The operator ignores the CSR subject and derives the CN from the Engine CR.
+	const cn = "ignored-cn"
 	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
 
@@ -118,7 +121,12 @@ func buildCSR(t *testing.T, cn string) (csrDER []byte, priv *ecdsa.PrivateKey) {
 }
 
 // engineCR builds a minimal Engine CR.
-func engineCR(ns, name string) *wafv1.Engine {
+func engineCR() *wafv1.Engine {
+	const (
+		ns   = "myns"
+		name = "myengine"
+	)
+
 	return &wafv1.Engine{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
@@ -154,9 +162,9 @@ func setupEnrollServer(t *testing.T, srv *grpcserver.Server) (wafv1pb.ConfigServ
 	require.NoError(t, err)
 
 	cancel := func() {
-		conn.Close()
+		_ = conn.Close()
 		grpcSrv.GracefulStop()
-		lis.Close()
+		_ = lis.Close()
 	}
 
 	return wafv1pb.NewConfigServiceClient(conn), cancel
@@ -164,14 +172,14 @@ func setupEnrollServer(t *testing.T, srv *grpcserver.Server) (wafv1pb.ConfigServ
 
 func TestEnroll_Success(t *testing.T) {
 	ca := buildCA(t)
-	csrDER, _ := buildCSR(t, "ignored-cn")
+	csrDER, _ := buildCSR(t)
 
-	kubeClient := fake.NewSimpleClientset()
-	kubeClient.Fake.PrependReactor("create", "tokenreviews",
+	kubeClient := fake.NewClientset()
+	kubeClient.PrependReactor("create", "tokenreviews",
 		tokenReviewReactor("system:serviceaccount:myns:myengine-engine"),
 	)
 
-	crClient := buildFakeCRClient(engineCR("myns", "myengine")).Build()
+	crClient := buildFakeCRClient(engineCR()).Build()
 
 	srv := &grpcserver.Server{
 		Store:      rulestore.NewStore(),
@@ -215,14 +223,14 @@ func TestEnroll_Success(t *testing.T) {
 
 func TestEnroll_WrongToken_PermissionDenied(t *testing.T) {
 	ca := buildCA(t)
-	csrDER, _ := buildCSR(t, "ignored-cn")
+	csrDER, _ := buildCSR(t)
 
-	kubeClient := fake.NewSimpleClientset()
-	kubeClient.Fake.PrependReactor("create", "tokenreviews",
+	kubeClient := fake.NewClientset()
+	kubeClient.PrependReactor("create", "tokenreviews",
 		unauthTokenReviewReactor(),
 	)
 
-	crClient := buildFakeCRClient(engineCR("myns", "myengine")).Build()
+	crClient := buildFakeCRClient(engineCR()).Build()
 
 	srv := &grpcserver.Server{
 		Store:      rulestore.NewStore(),
@@ -249,15 +257,15 @@ func TestEnroll_WrongToken_PermissionDenied(t *testing.T) {
 
 func TestEnroll_WrongSAUsername_PermissionDenied(t *testing.T) {
 	ca := buildCA(t)
-	csrDER, _ := buildCSR(t, "ignored-cn")
+	csrDER, _ := buildCSR(t)
 
-	kubeClient := fake.NewSimpleClientset()
+	kubeClient := fake.NewClientset()
 	// Authenticated as a different SA (different engine name).
-	kubeClient.Fake.PrependReactor("create", "tokenreviews",
+	kubeClient.PrependReactor("create", "tokenreviews",
 		tokenReviewReactor("system:serviceaccount:myns:other-engine"),
 	)
 
-	crClient := buildFakeCRClient(engineCR("myns", "myengine")).Build()
+	crClient := buildFakeCRClient(engineCR()).Build()
 
 	srv := &grpcserver.Server{
 		Store:      rulestore.NewStore(),
@@ -284,10 +292,10 @@ func TestEnroll_WrongSAUsername_PermissionDenied(t *testing.T) {
 
 func TestEnroll_EngineCRNotFound_NotFound(t *testing.T) {
 	ca := buildCA(t)
-	csrDER, _ := buildCSR(t, "ignored-cn")
+	csrDER, _ := buildCSR(t)
 
-	kubeClient := fake.NewSimpleClientset()
-	kubeClient.Fake.PrependReactor("create", "tokenreviews",
+	kubeClient := fake.NewClientset()
+	kubeClient.PrependReactor("create", "tokenreviews",
 		tokenReviewReactor("system:serviceaccount:myns:myengine-engine"),
 	)
 
@@ -320,12 +328,12 @@ func TestEnroll_EngineCRNotFound_NotFound(t *testing.T) {
 func TestEnroll_MalformedCSR_InvalidArgument(t *testing.T) {
 	ca := buildCA(t)
 
-	kubeClient := fake.NewSimpleClientset()
-	kubeClient.Fake.PrependReactor("create", "tokenreviews",
+	kubeClient := fake.NewClientset()
+	kubeClient.PrependReactor("create", "tokenreviews",
 		tokenReviewReactor("system:serviceaccount:myns:myengine-engine"),
 	)
 
-	crClient := buildFakeCRClient(engineCR("myns", "myengine")).Build()
+	crClient := buildFakeCRClient(engineCR()).Build()
 
 	srv := &grpcserver.Server{
 		Store:      rulestore.NewStore(),

@@ -43,9 +43,9 @@ func buildSPOAHandler(t *testing.T, rules string, mode Mode) *SPOAHandler {
 }
 
 // spoaTestMessage builds a synthetic SPOE Message carrying the given request fields.
-// The returned Message's KV scanner points into the provided buf; call this inside
-// a test function that does not outlive buf.
-func spoaTestMessage(t *testing.T, method, path, query string) (*encoding.Message, []byte) {
+// The returned Message's KV scanner points into a buffer owned by this helper,
+// which stays alive as long as the Message does.
+func spoaTestMessage(t *testing.T, method, path, query string) *encoding.Message {
 	t.Helper()
 
 	// We need to serialise KV pairs in the SPOE wire format, then wrap them
@@ -72,13 +72,13 @@ func spoaTestMessage(t *testing.T, method, path, query string) (*encoding.Messag
 	m := encoding.AcquireMessage()
 	m.KV = encoding.AcquireKVScanner(serialised, kvCount)
 
-	return m, serialised
+	return m
 }
 
 // spoaActionWriter returns an ActionWriter backed by a fresh buffer.
-func spoaActionWriter() (*encoding.ActionWriter, []byte) {
+func spoaActionWriter() *encoding.ActionWriter {
 	buf := make([]byte, 16384)
-	return encoding.NewActionWriter(buf, 0), buf
+	return encoding.NewActionWriter(buf, 0)
 }
 
 // readActionsMap parses the action bytes written by a HandleSPOE call back into
@@ -128,8 +128,9 @@ func readActionsMap(t *testing.T, w *encoding.ActionWriter) map[string]string {
 			// For int fields we just record the name as present.
 			out[name] = "<int>"
 		default:
-			// Skip unknown — not expected in our output.
-			break
+			// An unknown data type means the remaining bytes cannot be skipped
+			// correctly, so the rest of the buffer would be misparsed.
+			t.Fatalf("unexpected SPOE data type %v for %q", dt, name)
 		}
 	}
 	return out
@@ -174,7 +175,7 @@ func readActionsInt(t *testing.T, w *encoding.ActionWriter) map[string]int64 {
 			i += n
 			out[name] = int64(v)
 		default:
-			break
+			t.Fatalf("unexpected SPOE data type %v for %q", dt, name)
 		}
 	}
 	return out
@@ -182,10 +183,10 @@ func readActionsInt(t *testing.T, w *encoding.ActionWriter) map[string]int64 {
 
 func TestSPOAHandler_AllowsBenignRequest(t *testing.T) {
 	h := buildSPOAHandler(t, "SecRuleEngine On\n", ModeBlocking)
-	m, _ := spoaTestMessage(t, "GET", "/", "")
+	m := spoaTestMessage(t, "GET", "/", "")
 	defer encoding.ReleaseMessage(m)
 
-	w, _ := spoaActionWriter()
+	w := spoaActionWriter()
 	h.HandleSPOE(context.Background(), w, m)
 
 	strVars := readActionsMap(t, w)
@@ -199,10 +200,10 @@ func TestSPOAHandler_DeniesAttackInBlockingMode(t *testing.T) {
 	rules := `SecRuleEngine On
 SecRule REQUEST_URI "@contains /attack" "id:1,phase:1,deny,status:403"`
 	h := buildSPOAHandler(t, rules, ModeBlocking)
-	m, _ := spoaTestMessage(t, "GET", "/attack", "")
+	m := spoaTestMessage(t, "GET", "/attack", "")
 	defer encoding.ReleaseMessage(m)
 
-	w, _ := spoaActionWriter()
+	w := spoaActionWriter()
 	h.HandleSPOE(context.Background(), w, m)
 
 	strVars := readActionsMap(t, w)
@@ -218,10 +219,10 @@ func TestSPOAHandler_DetectionMode(t *testing.T) {
 	rules := `SecRuleEngine On
 SecRule REQUEST_URI "@contains /attack" "id:1,phase:1,deny,status:403"`
 	h := buildSPOAHandler(t, rules, ModeDetection)
-	m, _ := spoaTestMessage(t, "GET", "/attack", "")
+	m := spoaTestMessage(t, "GET", "/attack", "")
 	defer encoding.ReleaseMessage(m)
 
-	w, _ := spoaActionWriter()
+	w := spoaActionWriter()
 	h.HandleSPOE(context.Background(), w, m)
 
 	strVars := readActionsMap(t, w)
@@ -248,11 +249,11 @@ func TestServeSPOA_GracefulShutdown(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 	addr := ln.Addr().String()
-	ln.Close() // Free the port — ServeSPOA will re-bind.
+	_ = ln.Close() // Free the port — ServeSPOA will re-bind.
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- ServeSPOA(ctx, addr, h, logr.Discard())
+		errCh <- ServeSPOA(ctx, addr, h)
 	}()
 
 	// Give the goroutine time to bind.

@@ -130,23 +130,19 @@ func TestAtomicProvider_Concurrent(t *testing.T) {
 	var wg sync.WaitGroup
 
 	// Readers: hammer Current() and assert non-nil.
-	for i := 0; i < readers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for j := 0; j < iters*10; j++ {
+	for range readers {
+		wg.Go(func() {
+			for range iters * 10 {
 				w := p.Current()
 				assert.NotNil(t, w, "Current must never return nil")
 			}
-		}()
+		})
 	}
 
 	// Swappers: alternate valid/invalid bundles.
-	for i := 0; i < swappers; i++ {
-		wg.Add(1)
-		go func(idx int) {
-			defer wg.Done()
-			for j := 0; j < iters; j++ {
+	for range swappers {
+		wg.Go(func() {
+			for j := range iters {
 				if j%3 == 0 {
 					// Inject an invalid bundle — WAF must not be replaced.
 					_ = p.Swap("bad", "sha-bad", invalidSeclang)
@@ -154,7 +150,7 @@ func TestAtomicProvider_Concurrent(t *testing.T) {
 					_ = p.Swap("rs", "sha-ok", validSeclang)
 				}
 			}
-		}(i)
+		})
 	}
 
 	wg.Wait()

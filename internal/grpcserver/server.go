@@ -78,13 +78,13 @@ func NewServer(store *rulestore.Store, ca *pki.CertAuthority, kubeClient kuberne
 
 // unaryNoopInterceptor is a passthrough unary interceptor.
 // Enroll is deliberately allowed without a client cert; no gate is needed here.
-func unaryNoopInterceptor(ctx context.Context, req interface{}, _ *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+func unaryNoopInterceptor(ctx context.Context, req any, _ *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
 	return handler(ctx, req)
 }
 
 // subscribeClientCertInterceptor is a stream interceptor that enforces a
 // verified mTLS client cert for the Subscribe RPC. Enroll is exempt.
-func subscribeClientCertInterceptor(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+func subscribeClientCertInterceptor(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
 	if info.FullMethod == wafv1pb.ConfigService_Subscribe_FullMethodName {
 		if err := requireVerifiedClientCert(ss.Context()); err != nil {
 			return err

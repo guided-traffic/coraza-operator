@@ -106,8 +106,8 @@ func TestEnrollThenSubscribe(t *testing.T) {
 
 	// --- Fake kube client with a TokenReview reactor ---
 	saUsername := "system:serviceaccount:" + engineNS + ":" + engineName + "-engine"
-	kubeClient := fake.NewSimpleClientset()
-	kubeClient.Fake.PrependReactor("create", "tokenreviews",
+	kubeClient := fake.NewClientset()
+	kubeClient.PrependReactor("create", "tokenreviews",
 		func(_ k8stesting.Action) (bool, runtime.Object, error) {
 			return true, &authv1.TokenReview{
 				Status: authv1.TokenReviewStatus{
@@ -130,7 +130,7 @@ func TestEnrollThenSubscribe(t *testing.T) {
 	}()
 	t.Cleanup(func() {
 		grpcSrv.GracefulStop()
-		lis.Close()
+		_ = lis.Close()
 	})
 
 	dialBufconn := func(ctx context.Context, _ string) (net.Conn, error) {
@@ -167,7 +167,7 @@ func TestEnrollThenSubscribe(t *testing.T) {
 			grpc.WithTransportCredentials(credentials.NewTLS(enrollTLS)),
 		)
 		require.NoError(t, err)
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 
 		resp, err := wafv1pb.NewConfigServiceClient(conn).Enroll(ctx, &wafv1pb.EnrollRequest{
 			SaToken:         "fake-sa-token",
@@ -223,7 +223,7 @@ func TestEnrollThenSubscribe(t *testing.T) {
 			grpc.WithTransportCredentials(credentials.NewTLS(subscribeTLS)),
 		)
 		require.NoError(t, err)
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 
 		// Publish a bundle before subscribing.
 		store.Publish(engineNS, engineName, rulestore.Bundle{
@@ -263,7 +263,7 @@ func TestEnrollThenSubscribe(t *testing.T) {
 			grpc.WithTransportCredentials(credentials.NewTLS(subscribeTLS)),
 		)
 		require.NoError(t, err)
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 
 		streamCtx, streamCancel := context.WithCancel(ctx)
 		defer streamCancel()
@@ -310,7 +310,7 @@ func TestEnrollThenSubscribe(t *testing.T) {
 			grpc.WithTransportCredentials(credentials.NewTLS(noClientTLS)),
 		)
 		require.NoError(t, err)
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 
 		stream, err := wafv1pb.NewConfigServiceClient(conn).Subscribe(ctx, &wafv1pb.SubscribeRequest{
 			EngineNamespace: engineNS,

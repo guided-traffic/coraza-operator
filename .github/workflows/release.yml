@@ -448,7 +448,10 @@ jobs:
         run: kind delete cluster --name ${{ env.KIND_CLUSTER }} || true
 
   container-malware-scan:
-    name: Container Malware Scan
+    # The matrix value is spelled out in the job name so the check context stays
+    # stable ("Container Malware Scan (operator)"); otherwise GitHub appends every
+    # matrix key and a required-status-check rule would not match.
+    name: Container Malware Scan (${{ matrix.name }})
     runs-on: self-hosted
     needs: [malware-scan]  # Run after source scan passes
     strategy:
