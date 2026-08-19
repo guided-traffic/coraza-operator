@@ -1,0 +1,18 @@
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: allow-haproxy-spoa
+  namespace: coraza-demo
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: coraza-engine
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: external-ingress
+            k8s:gnp/external-reverse-proxy: ""
+      toPorts:
+        - ports:
+            - port: "9000"
+              protocol: TCP

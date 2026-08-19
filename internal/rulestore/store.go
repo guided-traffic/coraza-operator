@@ -84,6 +84,27 @@ func (s *Store) Publish(engineNS, engineName string, b Bundle) {
 	}
 }
 
+// PublishIfChanged stores and fans out b only when the current bundle's SHA256
+// differs from b.SHA256. Returns true if the bundle was accepted (new or
+// changed), false if it was a duplicate and no broadcast happened.
+// Same atomicity guarantees as Publish.
+func (s *Store) PublishIfChanged(engineNS, engineName string, b Bundle) bool {
+	k := engineKey{ns: engineNS, name: engineName}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if current, ok := s.bundles[k]; ok && current.SHA256 == b.SHA256 {
+		return false
+	}
+
+	s.bundles[k] = b
+	for sub := range s.subscribers[k] {
+		sendLatest(sub.ch, b)
+	}
+	return true
+}
+
 // sendLatest sends b to ch without blocking. If the channel is full, the
 // stale value is drained first so the consumer always sees the latest bundle.
 func sendLatest(ch chan Bundle, b Bundle) {

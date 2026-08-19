@@ -131,6 +131,13 @@ func TestBuildDeployment_ContainerName(t *testing.T) {
 	assert.Equal(t, "coraza-engine", dep.Spec.Template.Spec.Containers[0].Name)
 }
 
+func TestBuildDeployment_ImagePullPolicy(t *testing.T) {
+	engine := baseEngine()
+	dep := engineassets.BuildDeployment(engine, "", "", "")
+	require.Len(t, dep.Spec.Template.Spec.Containers, 1)
+	assert.Equal(t, corev1.PullAlways, dep.Spec.Template.Spec.Containers[0].ImagePullPolicy)
+}
+
 func TestBuildDeployment_DefaultListenerPort(t *testing.T) {
 	engine := baseEngine()
 	// Listener.Port == 0 — should default to 8080
@@ -275,11 +282,57 @@ func TestBuildDeployment_GRPCEnvVars_Set(t *testing.T) {
 			require.NotNil(t, e.ValueFrom.FieldRef)
 			assert.Equal(t, "metadata.namespace", e.ValueFrom.FieldRef.FieldPath)
 		case "ENGINE_NAME":
-			require.NotNil(t, e.ValueFrom)
-			require.NotNil(t, e.ValueFrom.FieldRef)
-			assert.Equal(t, "metadata.name", e.ValueFrom.FieldRef.FieldPath)
+			assert.Nil(t, e.ValueFrom, "ENGINE_NAME must be a literal value, not a fieldRef")
+			assert.Equal(t, "my-engine", e.Value)
 		}
 	}
+}
+
+func TestBuildDeployment_SPOAPort_Unset(t *testing.T) {
+	engine := baseEngine()
+	// SPOAPort defaults to 0 — no second port, no ENGINE_SPOA_ADDR env var.
+	dep := engineassets.BuildDeployment(engine, "", "", "")
+	c := dep.Spec.Template.Spec.Containers[0]
+
+	require.Len(t, c.Ports, 1, "only http port expected when SPOAPort is 0")
+	assert.Equal(t, "http", c.Ports[0].Name)
+
+	envMap := envByName(c.Env)
+	_, has := envMap["ENGINE_SPOA_ADDR"]
+	assert.False(t, has, "ENGINE_SPOA_ADDR must not be set when SPOAPort is 0")
+}
+
+func TestBuildDeployment_SPOAPort_Set(t *testing.T) {
+	engine := baseEngine()
+	engine.Spec.Listener.SPOAPort = 9000
+	dep := engineassets.BuildDeployment(engine, "", "", "")
+	c := dep.Spec.Template.Spec.Containers[0]
+
+	require.Len(t, c.Ports, 2, "http + spoa ports expected when SPOAPort is non-zero")
+	assert.Equal(t, "http", c.Ports[0].Name)
+	assert.Equal(t, "spoa", c.Ports[1].Name)
+	assert.Equal(t, int32(9000), c.Ports[1].ContainerPort)
+
+	envMap := envByName(c.Env)
+	assert.Equal(t, ":9000", envMap["ENGINE_SPOA_ADDR"])
+}
+
+func TestBuildService_SPOAPort_Unset(t *testing.T) {
+	engine := baseEngine()
+	svc := engineassets.BuildService(engine)
+	require.Len(t, svc.Spec.Ports, 1, "only http port expected when SPOAPort is 0")
+	assert.Equal(t, "http", svc.Spec.Ports[0].Name)
+}
+
+func TestBuildService_SPOAPort_Set(t *testing.T) {
+	engine := baseEngine()
+	engine.Spec.Listener.SPOAPort = 9000
+	svc := engineassets.BuildService(engine)
+	require.Len(t, svc.Spec.Ports, 2, "http + spoa ports expected when SPOAPort is non-zero")
+	assert.Equal(t, "http", svc.Spec.Ports[0].Name)
+	assert.Equal(t, "spoa", svc.Spec.Ports[1].Name)
+	assert.Equal(t, int32(9000), svc.Spec.Ports[1].Port)
+	assert.Equal(t, "spoa", svc.Spec.Ports[1].TargetPort.String())
 }
 
 // envByName converts an env slice to a name→value map for easy assertion.

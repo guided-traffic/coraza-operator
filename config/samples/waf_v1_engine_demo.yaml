@@ -11,3 +11,4 @@ spec:
     url: http://example-upstream.coraza-demo.svc:80
   listener:
     port: 8080
+    spoaPort: 9000

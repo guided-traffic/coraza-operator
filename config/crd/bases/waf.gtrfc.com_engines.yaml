@@ -77,6 +77,17 @@ spec:
                     description: proxyProtocol enables PROXY protocol support on the
                       listener.
                     type: boolean
+                  spoaPort:
+                    default: 0
+                    description: |-
+                      spoaPort is the TCP port the engine's SPOA (HAProxy SPOE) listener binds to.
+                      When set to 0 (the default), the SPOA listener is disabled.
+                      Set to a non-zero value (e.g. 9000) to enable SPOA so HAProxy Ingress
+                      Controller can offload WAF decisions via the SPOE protocol.
+                    format: int32
+                    maximum: 65535
+                    minimum: 0
+                    type: integer
                 type: object
               mode:
                 allOf:

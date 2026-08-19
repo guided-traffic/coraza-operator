@@ -62,6 +62,16 @@ type Config struct {
 	// SATokenPath is the path to the projected ServiceAccount token file used
 	// for bootstrap enrollment. Defaults to /var/run/secrets/coraza/token.
 	SATokenPath string
+
+	// SPOAListenAddr is the TCP address the SPOA listener binds to (e.g. ":9000").
+	// An empty value (the default) disables the SPOA listener.
+	// Set via ENGINE_SPOA_ADDR environment variable.
+	SPOAListenAddr string
+
+	// BundleCachePath is a writable path used to persist the latest compiled
+	// rule bundle received via gRPC, as a sanity backup for restart bootstrap.
+	// Defaults to /var/lib/coraza/cached-bundle.conf (writable emptyDir mount).
+	BundleCachePath string
 }
 
 // FromEnv reads configuration from environment variables.
@@ -118,6 +128,13 @@ func FromEnv() (Config, error) {
 		saTokenPath = "/var/run/secrets/coraza/token"
 	}
 
+	spoaAddr := os.Getenv("ENGINE_SPOA_ADDR")
+
+	bundleCache := os.Getenv("ENGINE_BUNDLE_CACHE")
+	if bundleCache == "" {
+		bundleCache = "/var/lib/coraza/cached-bundle.conf"
+	}
+
 	return Config{
 		ListenAddr:      listenAddr,
 		UpstreamURL:     upstream,
@@ -129,5 +146,7 @@ func FromEnv() (Config, error) {
 		EngineName:      engineName,
 		CertDir:         certDir,
 		SATokenPath:     saTokenPath,
+		SPOAListenAddr:  spoaAddr,
+		BundleCachePath: bundleCache,
 	}, nil
 }

@@ -47,6 +47,71 @@ func TestPublishWithoutSubscribers_GetReturnsBundle(t *testing.T) {
 	assert.Equal(t, "abc", got.SHA256)
 }
 
+func TestPublishIfChanged_FirstPublishReturnsTrue(t *testing.T) {
+	s := rulestore.NewStore()
+	changed := s.PublishIfChanged("ns1", "e1", bundle("abc"))
+	assert.True(t, changed)
+
+	got, ok := s.Get("ns1", "e1")
+	require.True(t, ok)
+	assert.Equal(t, "abc", got.SHA256)
+}
+
+func TestPublishIfChanged_SameSHAReturnsFalse(t *testing.T) {
+	s := rulestore.NewStore()
+	s.PublishIfChanged("ns1", "e1", bundle("abc"))
+
+	changed := s.PublishIfChanged("ns1", "e1", bundle("abc"))
+	assert.False(t, changed)
+}
+
+func TestPublishIfChanged_NewSHAReturnsTrue(t *testing.T) {
+	s := rulestore.NewStore()
+	s.PublishIfChanged("ns1", "e1", bundle("abc"))
+
+	changed := s.PublishIfChanged("ns1", "e1", bundle("def"))
+	assert.True(t, changed)
+
+	got, _ := s.Get("ns1", "e1")
+	assert.Equal(t, "def", got.SHA256)
+}
+
+func TestPublishIfChanged_DuplicateDoesNotBroadcast(t *testing.T) {
+	s := rulestore.NewStore()
+	s.Publish("ns1", "e1", bundle("abc"))
+
+	ch, unsub := s.Subscribe("ns1", "e1")
+	defer unsub()
+
+	// drain initial
+	select {
+	case <-ch:
+	case <-time.After(time.Second):
+		t.Fatal("did not receive initial bundle")
+	}
+
+	// duplicate publish: no broadcast expected
+	changed := s.PublishIfChanged("ns1", "e1", bundle("abc"))
+	assert.False(t, changed)
+
+	select {
+	case b := <-ch:
+		t.Fatalf("did not expect a broadcast for duplicate SHA, got %q", b.SHA256)
+	case <-time.After(150 * time.Millisecond):
+		// good: no broadcast
+	}
+
+	// new SHA: broadcast expected
+	changed = s.PublishIfChanged("ns1", "e1", bundle("def"))
+	assert.True(t, changed)
+	select {
+	case b := <-ch:
+		assert.Equal(t, "def", b.SHA256)
+	case <-time.After(time.Second):
+		t.Fatal("expected broadcast for new SHA")
+	}
+}
+
 func TestGet_NoBundle_ReturnsFalse(t *testing.T) {
 	s := rulestore.NewStore()
 	_, ok := s.Get("ns1", "e1")

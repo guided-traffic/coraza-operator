@@ -52,6 +52,16 @@ type ListenerConfig struct {
 	// +kubebuilder:default=false
 	// +optional
 	ProxyProtocol bool `json:"proxyProtocol,omitempty"`
+
+	// spoaPort is the TCP port the engine's SPOA (HAProxy SPOE) listener binds to.
+	// When set to 0 (the default), the SPOA listener is disabled.
+	// Set to a non-zero value (e.g. 9000) to enable SPOA so HAProxy Ingress
+	// Controller can offload WAF decisions via the SPOE protocol.
+	// +kubebuilder:default=0
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=65535
+	// +optional
+	SPOAPort int32 `json:"spoaPort,omitempty"`
 }
 
 // UpstreamConfig defines the backend target the engine proxies to.

@@ -169,6 +169,22 @@ func Run(ctx context.Context, cfg Config, logger logr.Logger) error {
 
 	errCh := make(chan error, 2)
 
+	// Start SPOA listener if configured.
+	if cfg.SPOAListenAddr != "" {
+		spoaHandler := &SPOAHandler{
+			Provider: provider,
+			Mode:     cfg.Mode,
+			Logger:   logger.WithName("spoa"),
+			Metrics:  newSPOAMetrics(reg),
+		}
+		go func() {
+			logger.Info("starting SPOA listener", "addr", cfg.SPOAListenAddr)
+			if spoaErr := ServeSPOA(ctx, cfg.SPOAListenAddr, spoaHandler, logger); spoaErr != nil {
+				errCh <- fmt.Errorf("spoa listener: %w", spoaErr)
+			}
+		}()
+	}
+
 	// Start gRPC config subscriber if configured.
 	// On successful bundle receipt: parse into a fresh WAF, atomically swap, persist to disk.
 	// On parse failure: keep current WAF, increment failure metric, log error.
@@ -196,11 +212,15 @@ func Run(ctx context.Context, cfg Config, logger logr.Logger) error {
 				m.wafReloadTotal.WithLabelValues("success").Inc()
 				m.wafCurrentRules.Set(float64(st.RuleCount))
 
-				// Persist to disk after a SUCCESSFUL swap so on container restart
-				// the engine can rebuild from disk while waiting for the first gRPC bundle.
-				if writeErr := atomicWriteFile(cfg.RuleFilePath, []byte(b.Compiled)); writeErr != nil {
-					logger.Error(writeErr, "atomic write bundle to rule file (debug aid)",
-						"path", cfg.RuleFilePath)
+				// Persist to writable cache path after a SUCCESSFUL swap so on container
+				// restart the engine can rebuild from disk while waiting for the first
+				// gRPC bundle. RuleFilePath is a ConfigMap mount (read-only) so we use
+				// BundleCachePath which lives on the writable coraza-state emptyDir.
+				if cfg.BundleCachePath != "" {
+					if writeErr := atomicWriteFile(cfg.BundleCachePath, []byte(b.Compiled)); writeErr != nil {
+						logger.Error(writeErr, "atomic write bundle to cache",
+							"path", cfg.BundleCachePath)
+					}
 				}
 			}
 

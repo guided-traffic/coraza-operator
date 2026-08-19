@@ -284,7 +284,7 @@ func (r *EngineReconciler) publishBundle(engineNS, engineName, ruleSetName strin
 	if r.Store == nil {
 		return
 	}
-	r.Store.Publish(engineNS, engineName, rulestore.Bundle{
+	r.Store.PublishIfChanged(engineNS, engineName, rulestore.Bundle{
 		RuleSetName: ruleSetName,
 		SHA256:      b.SHA256,
 		Compiled:    b.Compiled,

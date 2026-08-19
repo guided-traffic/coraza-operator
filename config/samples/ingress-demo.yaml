@@ -1,0 +1,23 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: coraza-demo
+  namespace: coraza-demo
+  labels:
+    cp/exposed-ingress: "enabled"
+  annotations:
+    haproxy-ingress.github.io/waf: "modsecurity"
+    haproxy-ingress.github.io/waf-mode: "deny"
+spec:
+  ingressClassName: hpi-external
+  rules:
+    - host: coraza.stage.wds18.de
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: example-upstream
+                port:
+                  number: 80

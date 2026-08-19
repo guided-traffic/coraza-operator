@@ -20,6 +20,8 @@ limitations under the License.
 package engineassets
 
 import (
+	"fmt"
+
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -70,6 +72,26 @@ const (
 	// CertStateMountPath is where the cert state volume is mounted.
 	CertStateMountPath = "/var/lib/coraza"
 )
+
+// buildContainerPorts returns the container port list for the engine container.
+// When spoaPort is non-zero, a second port named "spoa" is included.
+func buildContainerPorts(httpPort, spoaPort int32) []corev1.ContainerPort {
+	ports := []corev1.ContainerPort{
+		{
+			Name:          "http",
+			ContainerPort: httpPort,
+			Protocol:      corev1.ProtocolTCP,
+		},
+	}
+	if spoaPort != 0 {
+		ports = append(ports, corev1.ContainerPort{
+			Name:          "spoa",
+			ContainerPort: spoaPort,
+			Protocol:      corev1.ProtocolTCP,
+		})
+	}
+	return ports
+}
 
 // ServiceAccountName returns the ServiceAccount name for an engine.
 func ServiceAccountName(engine *wafv1.Engine) string { return engine.Name + "-engine" }
@@ -158,6 +180,12 @@ func BuildDeployment(engine *wafv1.Engine, appliedRuleSetHash, operatorGRPCAddr,
 		{Name: "ENGINE_MODE", Value: string(engine.Spec.Mode)},
 		{Name: "ENGINE_RULE_FILE", Value: RulesFilePath},
 	}
+	if engine.Spec.Listener.SPOAPort != 0 {
+		envVars = append(envVars, corev1.EnvVar{
+			Name:  "ENGINE_SPOA_ADDR",
+			Value: fmt.Sprintf(":%d", engine.Spec.Listener.SPOAPort),
+		})
+	}
 	if appliedRuleSetHash != "" {
 		envVars = append(envVars, corev1.EnvVar{Name: "RULESET_HASH", Value: appliedRuleSetHash})
 	}
@@ -170,12 +198,7 @@ func BuildDeployment(engine *wafv1.Engine, appliedRuleSetHash, operatorGRPCAddr,
 					FieldRef: &corev1.ObjectFieldSelector{FieldPath: "metadata.namespace"},
 				},
 			},
-			corev1.EnvVar{
-				Name: "ENGINE_NAME",
-				ValueFrom: &corev1.EnvVarSource{
-					FieldRef: &corev1.ObjectFieldSelector{FieldPath: "metadata.name"},
-				},
-			},
+			corev1.EnvVar{Name: "ENGINE_NAME", Value: engine.Name},
 		)
 	}
 
@@ -268,15 +291,10 @@ func BuildDeployment(engine *wafv1.Engine, appliedRuleSetHash, operatorGRPCAddr,
 					},
 					Containers: []corev1.Container{
 						{
-							Name:  containerName,
-							Image: image,
-							Ports: []corev1.ContainerPort{
-								{
-									Name:          "http",
-									ContainerPort: port,
-									Protocol:      corev1.ProtocolTCP,
-								},
-							},
+							Name:            containerName,
+							Image:           image,
+							ImagePullPolicy: corev1.PullAlways,
+							Ports:           buildContainerPorts(port, engine.Spec.Listener.SPOAPort),
 							Env:       envVars,
 							Resources: engine.Spec.Resources,
 							VolumeMounts: []corev1.VolumeMount{
@@ -307,13 +325,31 @@ func BuildDeployment(engine *wafv1.Engine, appliedRuleSetHash, operatorGRPCAddr,
 	return dep
 }
 
-// BuildService builds the desired ClusterIP Service exposing the listener port.
+// BuildService builds the desired ClusterIP Service exposing the listener port(s).
+// When SPOAPort is non-zero, a second port named "spoa" is included.
 func BuildService(engine *wafv1.Engine) *corev1.Service {
 	labels := Labels(engine)
 
 	port := defaultListenerPort
 	if engine.Spec.Listener.Port != 0 {
 		port = engine.Spec.Listener.Port
+	}
+
+	svcPorts := []corev1.ServicePort{
+		{
+			Name:       "http",
+			Port:       port,
+			TargetPort: intstr.FromInt32(port),
+			Protocol:   corev1.ProtocolTCP,
+		},
+	}
+	if engine.Spec.Listener.SPOAPort != 0 {
+		svcPorts = append(svcPorts, corev1.ServicePort{
+			Name:       "spoa",
+			Port:       engine.Spec.Listener.SPOAPort,
+			TargetPort: intstr.FromString("spoa"),
+			Protocol:   corev1.ProtocolTCP,
+		})
 	}
 
 	return &corev1.Service{
@@ -325,14 +361,7 @@ func BuildService(engine *wafv1.Engine) *corev1.Service {
 		Spec: corev1.ServiceSpec{
 			Type:     corev1.ServiceTypeClusterIP,
 			Selector: labels,
-			Ports: []corev1.ServicePort{
-				{
-					Name:       "http",
-					Port:       port,
-					TargetPort: intstr.FromInt32(port),
-					Protocol:   corev1.ProtocolTCP,
-				},
-			},
+			Ports:    svcPorts,
 		},
 	}
 }

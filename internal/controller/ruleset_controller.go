@@ -155,13 +155,15 @@ func (r *RuleSetReconciler) publishToEngines(
 		if eng.Spec.RuleSetRef.Name != rs.Name {
 			continue
 		}
-		r.Store.Publish(eng.Namespace, eng.Name, rulestore.Bundle{
+		changed := r.Store.PublishIfChanged(eng.Namespace, eng.Name, rulestore.Bundle{
 			RuleSetName: rs.Name,
 			SHA256:      b.SHA256,
 			Compiled:    b.Compiled,
 			GeneratedAt: time.Now(),
 		})
-		log.Info("published bundle to engine", "engine", eng.Name, "sha256", b.SHA256)
+		if changed {
+			log.Info("published bundle to engine", "engine", eng.Name, "sha256", b.SHA256)
+		}
 	}
 }
 

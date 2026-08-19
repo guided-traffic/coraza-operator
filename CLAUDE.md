@@ -1,5 +1,12 @@
 # Instructions
 
+## Operational Target (read first)
+
+[OPERATIONAL_TARGET.md](OPERATIONAL_TARGET.md) defines how this operator is meant to
+be operated in the end. Every ticket must state which target (`T1`…`T10`) or
+invariant (`I1`…`I6`) it advances. If a ticket conflicts with a target, stop and
+propose how to reshape the ticket — or how to amend the target — before implementing.
+
 ## Controller-Runtime Best Practices
 
 - **Reconciliation idempotence:** Every reconcile must be idempotent. Running the same reconcile twice with no external changes must produce identical results.
