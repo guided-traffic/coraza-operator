@@ -6,6 +6,8 @@ metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.20.1
   name: engines.waf.gtrfc.com
+  labels:
+    {{- include "coraza-operator.labels" . | nindent 4 }}
 spec:
   group: waf.gtrfc.com
   names:

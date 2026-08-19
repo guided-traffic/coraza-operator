@@ -8,16 +8,19 @@ namespace:
 # installCRDs: set to false to skip CRD installation (e.g. when managed externally).
 installCRDs: true
 
-# image: operator container image.
+# image: operator container image. Released to Docker Hub by
+# .github/workflows/build.yml; the release job rewrites `tag` to the release
+# version. Point `repository` at a local registry to run a dev build.
 image:
-  repository: harbor.k8s-main.wds18.net/guidedtraffic/coraza-operator
+  repository: guidedtraffic/coraza-operator
   tag: dev
   pullPolicy: Always
 
 # engineImage: default engine container image injected as DEFAULT_ENGINE_IMAGE env var.
-# Individual Engine resources can override this with spec.image.
+# Individual Engine resources can override this with spec.image. Operator and
+# engine are released together and always carry the same tag.
 engineImage:
-  repository: harbor.k8s-main.wds18.net/guidedtraffic/coraza-engine
+  repository: guidedtraffic/coraza-engine
   tag: dev
 
 # imagePullSecrets: optional list of image pull secrets for the operator pod.
