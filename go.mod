@@ -4,7 +4,7 @@ go 1.26.6
 
 require (
 	github.com/corazawaf/coraza/v3 v3.7.0
-	github.com/dropmorepackets/haproxy-go v0.0.8
+	github.com/dropmorepackets/haproxy-go v0.1.1
 	github.com/go-logr/logr v1.4.4
 	github.com/onsi/ginkgo/v2 v2.27.2
 	github.com/onsi/gomega v1.38.2
