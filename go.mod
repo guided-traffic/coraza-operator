@@ -1,8 +1,6 @@
 module github.com/guided-traffic/coraza-operator
 
-go 1.25.7
-
-toolchain go1.26.6
+go 1.26.6
 
 require (
 	github.com/corazawaf/coraza/v3 v3.7.0

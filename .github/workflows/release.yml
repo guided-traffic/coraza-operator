@@ -76,6 +76,9 @@ jobs:
       - name: Install dependencies
         run: go mod download
 
+      - name: Install build tools
+        run: sudo apt-get update && sudo apt-get install -y build-essential
+
       # Regenerate CRDs + DeepCopy and sync them into the Helm chart, then fail
       # loudly if the working tree is dirty. A stale checked-in chart CRD would
       # ship an API contract to end-user clusters that no longer matches api/v1/.
@@ -537,6 +540,9 @@ jobs:
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: ${{ env.GO_VERSION }}
+
+      - name: Install build tools
+        run: sudo apt-get update && sudo apt-get install -y build-essential
 
       - name: Download test coverage
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1

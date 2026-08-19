@@ -27,12 +27,43 @@
   ],
   "packageRules": [
     {
-      "description": "Go version: group all Go version updates together to keep them in sync (Dockerfile, Dockerfile.engine, go.mod, workflows)",
+      "description": "Go version: one PR updates every place the Go version is pinned - go.mod, Dockerfile, Dockerfile.engine, .devcontainer/devcontainer.json and the GO_VERSION env in both workflows. Every custom manager below emits datasource=golang-version, so this single group collects all of them.",
       "matchDatasources": [
         "golang-version"
       ],
       "groupName": "Go version",
       "groupSlug": "go-version"
+    },
+    {
+      "description": "The Go builder image is owned by the custom golang-version manager so it lands in the Go version PR. Without this the built-in dockerfile manager would open a second, competing PR on the same FROM line.",
+      "matchManagers": [
+        "dockerfile"
+      ],
+      "matchPackageNames": [
+        "golang"
+      ],
+      "enabled": false
+    },
+    {
+      "description": "Same for the devcontainer image: the custom manager owns it, the built-in devcontainer manager must not race it.",
+      "matchManagers": [
+        "devcontainer"
+      ],
+      "matchPackageNames": [
+        "golang"
+      ],
+      "enabled": false
+    },
+    {
+      "description": "The go/toolchain directives in go.mod are owned by the custom manager too. Renovate's gomod manager also extracts them (depType golang/toolchain) depending on version; disabling those depTypes keeps exactly one manager per line. No-op if this Renovate build does not extract them.",
+      "matchManagers": [
+        "gomod"
+      ],
+      "matchDepTypes": [
+        "golang",
+        "toolchain"
+      ],
+      "enabled": false
     },
     {
       "description": "Bundle golang.org/x/* updates with Go version bumps so govulncheck sees a consistent set (e.g. golang.org/x/net fixes shipped alongside Go releases)",
@@ -261,34 +292,37 @@
       "versioningTemplate": "semver"
     },
     {
-      "description": "Update the Go builder image in both Dockerfiles",
+      "description": "Go version in the container images and the devcontainer. Uses the golang-version datasource (not docker) so these land in the same PR as go.mod and the workflow pins; the built-in dockerfile and devcontainer managers are disabled for golang in packageRules.",
       "customType": "regex",
       "managerFilePatterns": [
         "/^Dockerfile$/",
-        "/^Dockerfile\\.engine$/"
+        "/^Dockerfile\\.engine$/",
+        "/^\\.devcontainer/devcontainer\\.json$/"
       ],
       "matchStrings": [
-        "FROM\\s+(?:--platform=\\S+\\s+)?golang:(?<currentValue>[\\d.]+)"
+        "FROM\\s+(?:--platform=\\S+\\s+)?golang:(?<currentValue>[\\d.]+)",
+        "\"image\":\\s*\"golang:(?<currentValue>[\\d.]+)\""
       ],
       "depNameTemplate": "golang",
       "datasourceTemplate": "golang-version",
       "versioningTemplate": "semver"
     },
     {
-      "description": "Update Go version in go.mod",
+      "description": "Go version in go.mod. The second pattern covers a toolchain directive; there is none today, but `go mod tidy` can re-add one and it must not drift from the go directive.",
       "customType": "regex",
       "managerFilePatterns": [
         "/^go\\.mod$/"
       ],
       "matchStrings": [
-        "\\ngo\\s+(?<currentValue>[\\d.]+)\\n"
+        "\\ngo\\s+(?<currentValue>[\\d.]+)\\n",
+        "\\ntoolchain go(?<currentValue>[\\d.]+)\\n"
       ],
       "depNameTemplate": "golang",
       "datasourceTemplate": "golang-version",
       "versioningTemplate": "semver"
     },
     {
-      "description": "Update the CI Go toolchain pinned in GitHub workflows",
+      "description": "Go toolchain pinned as GO_VERSION in the GitHub workflows.",
       "customType": "regex",
       "managerFilePatterns": [
         "/^\\.github/workflows/.*\\.ya?ml$/"
