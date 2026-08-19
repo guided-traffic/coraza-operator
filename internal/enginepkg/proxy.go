@@ -60,110 +60,163 @@ func BuildHandler(p WAFProvider, upstream *url.URL, mode Mode, logger logr.Logge
 			}
 		}()
 
-		// Phase 1: connection + URI.
-		tx.ProcessConnection(r.RemoteAddr, 0, r.Host, 0)
-		tx.ProcessURI(r.RequestURI, r.Method, r.Proto)
-
-		// Feed request headers (Go strips Host from r.Header, add explicitly).
-		for key, vals := range r.Header {
-			for _, v := range vals {
-				tx.AddRequestHeader(key, v)
-			}
-		}
-		if r.Host != "" {
-			tx.AddRequestHeader("Host", r.Host)
-		}
-
-		if it := tx.ProcessRequestHeaders(); it != nil {
-			blockOrDetect(w, mode, it, logger, m, start)
-			if mode == ModeBlocking {
-				return
-			}
-		}
-
-		// Phase 2: request body (buffered up to limit).
-		if r.Body != nil {
-			body, err := io.ReadAll(io.LimitReader(r.Body, requestBodyLimit))
-			if err != nil {
-				logger.Error(err, "read request body")
-				m.requestsTotal.WithLabelValues("error").Inc()
-				http.Error(w, "internal server error", http.StatusInternalServerError)
-				return
-			}
-			_ = r.Body.Close()
-			// Re-set body for the upstream proxy.
-			r.Body = io.NopCloser(bytes.NewReader(body))
-
-			writeIt, _, writeErr := tx.WriteRequestBody(body)
-			if writeErr != nil {
-				logger.Error(writeErr, "write request body to WAF")
-				m.requestsTotal.WithLabelValues("error").Inc()
-				http.Error(w, "internal server error", http.StatusInternalServerError)
-				return
-			}
-			if writeIt != nil {
-				blockOrDetect(w, mode, writeIt, logger, m, start)
-				if mode == ModeBlocking {
-					return
-				}
-			}
-		}
-
-		processIt, processErr := tx.ProcessRequestBody()
-		if processErr != nil {
-			logger.Error(processErr, "process request body")
-			m.requestsTotal.WithLabelValues("error").Inc()
-			http.Error(w, "internal server error", http.StatusInternalServerError)
+		if inspectRequest(w, r, tx, mode, logger, m, start) {
 			return
-		}
-		if processIt != nil {
-			blockOrDetect(w, mode, processIt, logger, m, start)
-			if mode == ModeBlocking {
-				return
-			}
 		}
 
 		// Phase 3: proxy to upstream, capture response for WAF processing.
 		rec := newResponseRecorder(w)
 		rp.ServeHTTP(rec, r)
 
-		// Phase 4: response headers.
-		for key, vals := range rec.header {
-			for _, v := range vals {
-				tx.AddResponseHeader(key, v)
-			}
-		}
-		respIt := tx.ProcessResponseHeaders(rec.status, "HTTP/1.1")
-		if respIt != nil {
-			if mode == ModeBlocking {
-				m.requestsTotal.WithLabelValues("blocked").Inc()
-				m.requestLatency.Observe(time.Since(start).Seconds())
-				http.Error(w, "response blocked by WAF", http.StatusForbidden)
-				return
-			}
-			logger.Info("WAF interrupted response (detection mode, passing through)", "status", respIt.Status)
+		if inspectResponse(w, rec, tx, mode, logger, m, start) {
+			return
 		}
 
-		// Phase 5: response body (best-effort; ignore interruption for now).
-		if _, _, writeRespErr := tx.WriteResponseBody(rec.body.Bytes()); writeRespErr != nil {
-			logger.Error(writeRespErr, "write response body to WAF")
-		}
-		if _, processRespErr := tx.ProcessResponseBody(); processRespErr != nil {
-			logger.Error(processRespErr, "process response body")
-		}
-
-		// Flush buffered upstream response to the real writer.
-		for key, vals := range rec.header {
-			for _, v := range vals {
-				w.Header().Add(key, v)
-			}
-		}
-		w.WriteHeader(rec.status)
-		_, _ = w.Write(rec.body.Bytes())
+		flushRecorded(w, rec)
 
 		m.requestsTotal.WithLabelValues("allowed").Inc()
 		m.requestLatency.Observe(time.Since(start).Seconds())
 	})
+}
+
+// inspectRequest runs the request-side WAF phases (connection, URI, headers,
+// body). It reports whether a response has already been written and the handler
+// must stop; in Detection mode an interruption is recorded but never stops the
+// request.
+func inspectRequest(
+	w http.ResponseWriter,
+	r *http.Request,
+	tx corazatypes.Transaction,
+	mode Mode,
+	logger logr.Logger,
+	m *engineMetrics,
+	start time.Time,
+) bool {
+	// Phase 1: connection + URI.
+	tx.ProcessConnection(r.RemoteAddr, 0, r.Host, 0)
+	tx.ProcessURI(r.RequestURI, r.Method, r.Proto)
+
+	addRequestHeaders(tx, r)
+
+	if it := tx.ProcessRequestHeaders(); it != nil {
+		blockOrDetect(w, mode, it, logger, m, start)
+		if mode == ModeBlocking {
+			return true
+		}
+	}
+
+	// Phase 2: request body (buffered up to limit).
+	if r.Body != nil {
+		body, err := io.ReadAll(io.LimitReader(r.Body, requestBodyLimit))
+		if err != nil {
+			return internalError(w, logger, m, err, "read request body")
+		}
+		_ = r.Body.Close()
+		// Re-set body for the upstream proxy.
+		r.Body = io.NopCloser(bytes.NewReader(body))
+
+		writeIt, _, writeErr := tx.WriteRequestBody(body)
+		if writeErr != nil {
+			return internalError(w, logger, m, writeErr, "write request body to WAF")
+		}
+		if writeIt != nil {
+			blockOrDetect(w, mode, writeIt, logger, m, start)
+			if mode == ModeBlocking {
+				return true
+			}
+		}
+	}
+
+	processIt, processErr := tx.ProcessRequestBody()
+	if processErr != nil {
+		return internalError(w, logger, m, processErr, "process request body")
+	}
+	if processIt != nil {
+		blockOrDetect(w, mode, processIt, logger, m, start)
+		if mode == ModeBlocking {
+			return true
+		}
+	}
+
+	return false
+}
+
+// inspectResponse runs the response-side WAF phases against the recorded
+// upstream response. It reports whether the response was already written.
+func inspectResponse(
+	w http.ResponseWriter,
+	rec *responseRecorder,
+	tx corazatypes.Transaction,
+	mode Mode,
+	logger logr.Logger,
+	m *engineMetrics,
+	start time.Time,
+) bool {
+	// Phase 4: response headers.
+	for key, vals := range rec.header {
+		for _, v := range vals {
+			tx.AddResponseHeader(key, v)
+		}
+	}
+
+	if respIt := tx.ProcessResponseHeaders(rec.status, "HTTP/1.1"); respIt != nil {
+		if mode == ModeBlocking {
+			m.requestsTotal.WithLabelValues("blocked").Inc()
+			m.requestLatency.Observe(time.Since(start).Seconds())
+			http.Error(w, "response blocked by WAF", http.StatusForbidden)
+			return true
+		}
+		logger.Info("WAF interrupted response (detection mode, passing through)", "status", respIt.Status)
+	}
+
+	// Phase 5: response body (best-effort; ignore interruption for now).
+	if _, _, writeRespErr := tx.WriteResponseBody(rec.body.Bytes()); writeRespErr != nil {
+		logger.Error(writeRespErr, "write response body to WAF")
+	}
+	if _, processRespErr := tx.ProcessResponseBody(); processRespErr != nil {
+		logger.Error(processRespErr, "process response body")
+	}
+
+	return false
+}
+
+// addRequestHeaders feeds the request headers into the transaction. Go strips
+// Host from r.Header, so it is added explicitly.
+func addRequestHeaders(tx corazatypes.Transaction, r *http.Request) {
+	for key, vals := range r.Header {
+		for _, v := range vals {
+			tx.AddRequestHeader(key, v)
+		}
+	}
+	if r.Host != "" {
+		tx.AddRequestHeader("Host", r.Host)
+	}
+}
+
+// flushRecorded writes the buffered upstream response to the real writer.
+func flushRecorded(w http.ResponseWriter, rec *responseRecorder) {
+	for key, vals := range rec.header {
+		for _, v := range vals {
+			w.Header().Add(key, v)
+		}
+	}
+	w.WriteHeader(rec.status)
+	_, _ = w.Write(rec.body.Bytes())
+}
+
+// internalError reports an engine-side failure to the client and records it.
+// It always returns true so callers can stop the request in a single line.
+func internalError(
+	w http.ResponseWriter,
+	logger logr.Logger,
+	m *engineMetrics,
+	err error,
+	msg string,
+) bool {
+	logger.Error(err, msg)
+	m.requestsTotal.WithLabelValues("error").Inc()
+	http.Error(w, "internal server error", http.StatusInternalServerError)
+	return true
 }
 
 // blockOrDetect responds with an error in Blocking mode; logs the interruption in Detection mode.

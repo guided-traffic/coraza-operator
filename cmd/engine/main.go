@@ -24,6 +24,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/go-logr/logr"
 	ctrlzap "sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	"github.com/guided-traffic/coraza-operator/internal/enginepkg"
@@ -41,7 +42,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	if runErr := enginepkg.Run(ctx, cfg, logger); runErr != nil {
+	if runErr := enginepkg.Run(logr.NewContext(ctx, logger), cfg); runErr != nil {
 		logger.Error(runErr, "engine terminated with error")
 		fmt.Fprintf(os.Stderr, "engine error: %v\n", runErr)
 		os.Exit(1)

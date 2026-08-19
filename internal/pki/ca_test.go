@@ -34,15 +34,11 @@ import (
 	"github.com/guided-traffic/coraza-operator/internal/pki"
 )
 
-func newFakeClient(objs ...runtime.Object) *fake.ClientBuilder {
+func newFakeClient() *fake.ClientBuilder {
 	scheme := runtime.NewScheme()
 	_ = clientgoscheme.AddToScheme(scheme)
 	_ = corev1.AddToScheme(scheme)
-	b := fake.NewClientBuilder().WithScheme(scheme)
-	for _, o := range objs {
-		b = b.WithRuntimeObjects(o)
-	}
-	return b
+	return fake.NewClientBuilder().WithScheme(scheme)
 }
 
 func TestLoadOrCreate_CreatesNewCA(t *testing.T) {

@@ -21,6 +21,10 @@ Dockerfile.cross
 *.out
 cover.out
 coverage.*
+/coverage/
+# ...but the shields.io badge is a committed release artifact (semantic-release
+# updates it on every release), so it must survive the coverage.* pattern above.
+!.github/badges/coverage.json
 
 # Go workspace file
 go.work
@@ -39,6 +43,10 @@ go.work
 # Packaged Helm charts
 charts/**/*.tgz
 charts/**/charts/
+dist/
+
+# semantic-release node dependencies
+node_modules/
 
 # Local kubebuilder envtest assets cache
 /bin/k8s/

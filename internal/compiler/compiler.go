@@ -88,7 +88,7 @@ func Compile(sources []Source) (*Bundle, error) {
 		fmt.Fprintf(&sb, "# --- end %s ---\n", label)
 
 		// Scan for directives in the body.
-		for _, line := range strings.Split(src.Body, "\n") {
+		for line := range strings.SplitSeq(src.Body, "\n") {
 			if !ruleDirectiveRe.MatchString(line) {
 				continue
 			}
@@ -122,7 +122,7 @@ func sha256hex(s string) string {
 // build SecLang outside the compiler pipeline (e.g. WAF swap on bundle receipt).
 func CountRules(seclang string) int {
 	var n int
-	for _, line := range strings.Split(seclang, "\n") {
+	for line := range strings.SplitSeq(seclang, "\n") {
 		if ruleDirectiveRe.MatchString(line) {
 			n++
 		}

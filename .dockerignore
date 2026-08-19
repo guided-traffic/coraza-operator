@@ -1,11 +1,21 @@
 # More info: https://docs.docker.com/engine/reference/builder/#dockerignore-file
-# Ignore everything by default and re-include only needed files
-**
-
-# Re-include Go source files (but not *_test.go)
-!**/*.go
-**/*_test.go
-
-# Re-include Go module files
+#
+# Deny everything at the root, then re-include only what the two builds need.
+# Nothing else reaches the build context, so local credential files (local_*),
+# kubeconfigs and notes cannot end up in an image by accident.
+#
+# NOTE: this uses `*` plus directory re-includes, deliberately NOT `**` plus
+# `!**/*.go`. The legacy docker builder (no BuildKit) does not re-include files
+# that sit under an excluded directory, so the `**` form yields a context of
+# only go.mod/go.sum and the build fails with
+# "package cmd/main.go is not in std". BuildKit accepts both forms.
+*
 !go.mod
 !go.sum
+!api
+!cmd
+!internal
+!proto
+
+# Tests never belong in a release image.
+**/*_test.go

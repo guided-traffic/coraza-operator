@@ -22,6 +22,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"net/textproto"
 	"strconv"
@@ -89,65 +90,13 @@ type SPOAHandler struct {
 // Output variables written back to HAProxy using TXN scope.
 // The SPOE config at the haproxy-ingress side prefixes variables with "coraza.",
 // so we write bare names: action, id, status, rules_hit, rule_ids.
-func (h *SPOAHandler) HandleSPOE(ctx context.Context, w *encoding.ActionWriter, m *encoding.Message) {
+func (h *SPOAHandler) HandleSPOE(_ context.Context, w *encoding.ActionWriter, m *encoding.Message) {
 	start := time.Now()
 
-	var (
-		method    string
-		path      string
-		query     string
-		reqVer    string
-		hdrsBin   []byte
-		bodyBytes []byte
-	)
-
-	kv := encoding.AcquireKVEntry()
-	defer encoding.ReleaseKVEntry(kv)
-
-	// HAProxy Ingress Controller sends args POSITIONALLY (no name= prefix in
-	// spoe-message args directive), so wire-level KV names arrive empty.
-	// We accept both: match by name when set, fall back to declaration order.
-	// IC default order: unique-id, method, path, query, req.ver, req.hdrs_bin,
-	// req.body_size, req.body.
-	idx := 0
-	for m.KV.Next(kv) {
-		name := string(kv.NameBytes())
-		switch {
-		case name == "method" || (name == "" && idx == 1):
-			method = string(kv.ValueBytes())
-		case name == "path" || (name == "" && idx == 2):
-			path = string(kv.ValueBytes())
-		case name == "query" || (name == "" && idx == 3):
-			query = string(kv.ValueBytes())
-		case name == "req.ver" || (name == "" && idx == 4):
-			reqVer = string(kv.ValueBytes())
-		case name == "req.hdrs_bin" || (name == "" && idx == 5):
-			b := kv.ValueBytes()
-			cp := make([]byte, len(b))
-			copy(cp, b)
-			hdrsBin = cp
-		case name == "req.body" || (name == "" && idx == 7):
-			b := kv.ValueBytes()
-			cp := make([]byte, len(b))
-			copy(cp, b)
-			bodyBytes = cp
-			// unique-id (idx 0) and req.body_size (idx 6) accepted but unused.
-		}
-		idx++
-	}
-
-	if err := m.KV.Error(); err != nil {
-		h.Logger.Error(err, "SPOE KV scan error")
-		h.setErrorVars(w, err.Error())
-		if h.Metrics != nil {
-			h.Metrics.messagesTotal.WithLabelValues("error").Inc()
-			h.Metrics.messageDuration.Observe(time.Since(start).Seconds())
-		}
+	req, err := parseSPOERequest(m)
+	if err != nil {
+		h.fail(w, err, "SPOE KV scan error", start)
 		return
-	}
-
-	if reqVer == "" {
-		reqVer = "1.1"
 	}
 
 	waf := h.Provider.Current()
@@ -161,86 +110,157 @@ func (h *SPOAHandler) HandleSPOE(ctx context.Context, w *encoding.ActionWriter, 
 
 	// Phase 1: connection (zeros for unknown IPs/ports).
 	tx.ProcessConnection("", 0, "", 0)
-
-	fullURI := path
-	if query != "" {
-		fullURI = path + "?" + query
-	}
-	tx.ProcessURI(fullURI, method, "HTTP/"+reqVer)
+	tx.ProcessURI(req.fullURI(), req.method, "HTTP/"+req.reqVer)
 
 	// Parse binary header block (HTTP/1.1 wire format).
-	if len(hdrsBin) > 0 {
-		if err := feedHeaders(tx, hdrsBin); err != nil {
-			h.Logger.Error(err, "parse SPOE header block (non-fatal, continuing)")
+	if len(req.hdrsBin) > 0 {
+		if hdrErr := feedHeaders(tx, req.hdrsBin); hdrErr != nil {
+			h.Logger.Error(hdrErr, "parse SPOE header block (non-fatal, continuing)")
 		}
 	}
 
 	if it := tx.ProcessRequestHeaders(); it != nil {
-		outcome := h.applyInterruption(w, tx, it)
-		if h.Metrics != nil {
-			h.Metrics.messagesTotal.WithLabelValues(outcome).Inc()
-			h.Metrics.messageDuration.Observe(time.Since(start).Seconds())
-		}
+		h.observe(h.applyInterruption(w, tx, it), start)
 		return
 	}
 
 	// Phase 2: request body.
-	if len(bodyBytes) > 0 {
-		writeIt, _, err := tx.WriteRequestBody(bodyBytes)
-		if err != nil {
-			h.Logger.Error(err, "write request body to WAF (SPOA)")
-			h.setErrorVars(w, err.Error())
-			if h.Metrics != nil {
-				h.Metrics.messagesTotal.WithLabelValues("error").Inc()
-				h.Metrics.messageDuration.Observe(time.Since(start).Seconds())
-			}
+	if len(req.bodyBytes) > 0 {
+		writeIt, _, writeErr := tx.WriteRequestBody(req.bodyBytes)
+		if writeErr != nil {
+			h.fail(w, writeErr, "write request body to WAF (SPOA)", start)
 			return
 		}
 		if writeIt != nil {
-			outcome := h.applyInterruption(w, tx, writeIt)
-			if h.Metrics != nil {
-				h.Metrics.messagesTotal.WithLabelValues(outcome).Inc()
-				h.Metrics.messageDuration.Observe(time.Since(start).Seconds())
-			}
+			h.observe(h.applyInterruption(w, tx, writeIt), start)
 			return
 		}
 	}
 
-	processIt, err := tx.ProcessRequestBody()
-	if err != nil {
-		h.Logger.Error(err, "process request body (SPOA)")
-		h.setErrorVars(w, err.Error())
-		if h.Metrics != nil {
-			h.Metrics.messagesTotal.WithLabelValues("error").Inc()
-			h.Metrics.messageDuration.Observe(time.Since(start).Seconds())
-		}
+	processIt, processErr := tx.ProcessRequestBody()
+	if processErr != nil {
+		h.fail(w, processErr, "process request body (SPOA)", start)
 		return
 	}
 	if processIt != nil {
-		outcome := h.applyInterruption(w, tx, processIt)
-		if h.Metrics != nil {
-			h.Metrics.messagesTotal.WithLabelValues(outcome).Inc()
-			h.Metrics.messageDuration.Observe(time.Since(start).Seconds())
-		}
+		h.observe(h.applyInterruption(w, tx, processIt), start)
 		return
 	}
 
-	// No interruption — always allow.
+	h.applyAllow(w, tx)
+	h.observe("allowed", start)
+}
+
+// spoeRequest holds the request fields HandleSPOE reads off the SPOE wire.
+type spoeRequest struct {
+	method    string
+	path      string
+	query     string
+	reqVer    string
+	hdrsBin   []byte
+	bodyBytes []byte
+}
+
+// fullURI joins path and query back into the URI Coraza evaluates.
+func (r spoeRequest) fullURI() string {
+	if r.query == "" {
+		return r.path
+	}
+	return r.path + "?" + r.query
+}
+
+// spoeFields maps each request field to its wire name and its position in the
+// positional form. unique-id (position 0) and req.body_size (position 6) are
+// accepted by the scanner but carry nothing the WAF needs.
+var spoeFields = []struct {
+	name     string
+	position int
+	assign   func(*spoeRequest, []byte)
+}{
+	{"method", 1, func(r *spoeRequest, v []byte) { r.method = string(v) }},
+	{"path", 2, func(r *spoeRequest, v []byte) { r.path = string(v) }},
+	{"query", 3, func(r *spoeRequest, v []byte) { r.query = string(v) }},
+	{"req.ver", 4, func(r *spoeRequest, v []byte) { r.reqVer = string(v) }},
+	{"req.hdrs_bin", 5, func(r *spoeRequest, v []byte) { r.hdrsBin = bytes.Clone(v) }},
+	{"req.body", 7, func(r *spoeRequest, v []byte) { r.bodyBytes = bytes.Clone(v) }},
+}
+
+// parseSPOERequest reads the SPOE KV pairs of one message into a spoeRequest.
+//
+// HAProxy Ingress Controller sends args POSITIONALLY (no name= prefix in the
+// spoe-message args directive), so wire-level KV names arrive empty. Both forms
+// are accepted: match by name when set, fall back to declaration order.
+// IC default order: unique-id, method, path, query, req.ver, req.hdrs_bin,
+// req.body_size, req.body.
+func parseSPOERequest(m *encoding.Message) (spoeRequest, error) {
+	var req spoeRequest
+
+	kv := encoding.AcquireKVEntry()
+	defer encoding.ReleaseKVEntry(kv)
+
+	idx := 0
+	for m.KV.Next(kv) {
+		name := string(kv.NameBytes())
+		for _, f := range spoeFields {
+			if name == f.name || (name == "" && idx == f.position) {
+				f.assign(&req, kv.ValueBytes())
+				break
+			}
+		}
+		idx++
+	}
+
+	if err := m.KV.Error(); err != nil {
+		return spoeRequest{}, err
+	}
+
+	if req.reqVer == "" {
+		req.reqVer = "1.1"
+	}
+
+	return req, nil
+}
+
+// observe records the outcome and duration of one handled SPOE message.
+func (h *SPOAHandler) observe(outcome string, start time.Time) {
+	if h.Metrics == nil {
+		return
+	}
+	h.Metrics.messagesTotal.WithLabelValues(outcome).Inc()
+	h.Metrics.messageDuration.Observe(time.Since(start).Seconds())
+}
+
+// fail logs err, writes the error response variables and records the outcome.
+// The request is not blocked: an engine-side failure must not take traffic down.
+func (h *SPOAHandler) fail(w *encoding.ActionWriter, err error, msg string, start time.Time) {
+	h.Logger.Error(err, msg)
+	h.setErrorVars(w, err.Error())
+	h.observe("error", start)
+}
+
+// applyAllow writes the response variables for a request no rule interrupted.
+func (h *SPOAHandler) applyAllow(w *encoding.ActionWriter, tx corazatypes.Transaction) {
 	matched := tx.MatchedRules()
-	rulesHit := int32(len(matched))
-	ruleIDs := buildRuleIDs(matched)
 
 	scope := encoding.VarScopeTransaction
 	_ = w.SetString(scope, "action", "allow")
 	_ = w.SetString(scope, "id", tx.ID())
 	_ = w.SetInt32(scope, "status", 200)
-	_ = w.SetInt32(scope, "rules_hit", rulesHit)
-	_ = w.SetString(scope, "rule_ids", ruleIDs)
+	_ = w.SetInt32(scope, "rules_hit", clampInt32(len(matched)))
+	_ = w.SetString(scope, "rule_ids", buildRuleIDs(matched))
+}
 
-	if h.Metrics != nil {
-		h.Metrics.messagesTotal.WithLabelValues("allowed").Inc()
-		h.Metrics.messageDuration.Observe(time.Since(start).Seconds())
+// clampInt32 narrows an int to the int32 the SPOE wire format carries. The
+// counts involved (matched rules, HTTP status) can never realistically reach
+// 2^31, but the conversion must saturate rather than wrap silently if they did.
+func clampInt32(n int) int32 {
+	if n > math.MaxInt32 {
+		return math.MaxInt32
 	}
+	if n < math.MinInt32 {
+		return math.MinInt32
+	}
+	return int32(n)
 }
 
 // applyInterruption writes the deny/allow response variables for an interruption.
@@ -252,10 +272,10 @@ func (h *SPOAHandler) applyInterruption(
 	it *corazatypes.Interruption,
 ) string {
 	matched := tx.MatchedRules()
-	rulesHit := int32(len(matched))
+	rulesHit := clampInt32(len(matched))
 	ruleIDs := buildRuleIDs(matched)
 
-	status := int32(it.Status)
+	status := clampInt32(it.Status)
 	if status == 0 {
 		status = 403
 	}
@@ -320,7 +340,9 @@ func feedHeaders(tx interface{ AddRequestHeader(key, value string) }, hdrsBin []
 // ServeSPOA starts the SPOA TCP listener on addr and serves until ctx is cancelled.
 // It returns nil when the context is cancelled (graceful shutdown), or a non-nil
 // error on unexpected listener failure.
-func ServeSPOA(ctx context.Context, addr string, handler *SPOAHandler, logger logr.Logger) error {
+func ServeSPOA(ctx context.Context, addr string, handler *SPOAHandler) error {
+	logger := logr.FromContextOrDiscard(ctx)
+
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return fmt.Errorf("spoa listen %s: %w", addr, err)

@@ -3,9 +3,11 @@
 ## Operational Target (read first)
 
 [OPERATIONAL_TARGET.md](OPERATIONAL_TARGET.md) defines how this operator is meant to
-be operated in the end. Every ticket must state which target (`T1`…`T10`) or
-invariant (`I1`…`I6`) it advances. If a ticket conflicts with a target, stop and
-propose how to reshape the ticket — or how to amend the target — before implementing.
+be operated in the end. A ticket does not have to advance a target — infrastructure,
+tooling and delivery work legitimately advances none. It must not run against one:
+if a ticket conflicts with a target (`T1`…`T10`) or an invariant (`I1`…`I6`), stop
+and propose how to reshape the ticket — or how to amend the target — before
+implementing.
 
 ## Controller-Runtime Best Practices
 

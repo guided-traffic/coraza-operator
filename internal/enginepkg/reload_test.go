@@ -41,8 +41,13 @@ import (
 )
 
 // gatherCounter reads the current float64 value of a CounterVec label pair.
-func gatherCounter(t *testing.T, reg *prometheus.Registry, name, labelKey, labelVal string) float64 {
+func gatherCounter(t *testing.T, reg *prometheus.Registry, labelVal string) float64 {
 	t.Helper()
+
+	const (
+		name     = "coraza_engine_waf_reload_total"
+		labelKey = "result"
+	)
 	mfs, err := reg.Gather()
 	require.NoError(t, err)
 	for _, mf := range mfs {
@@ -116,8 +121,8 @@ func TestReload_SuccessfulSwap_IncrementsMetrics(t *testing.T) {
 		Compiled:    validSeclang,
 	}, logr.Discard())
 
-	assert.Equal(t, float64(1), gatherCounter(t, reg, "coraza_engine_waf_reload_total", "result", "success"))
-	assert.Equal(t, float64(0), gatherCounter(t, reg, "coraza_engine_waf_reload_total", "result", "failure"))
+	assert.Equal(t, float64(1), gatherCounter(t, reg, "success"))
+	assert.Equal(t, float64(0), gatherCounter(t, reg, "failure"))
 	assert.Equal(t, float64(1), gatherGauge(t, reg, "coraza_engine_waf_current_rules"))
 
 	st := provider.State()
@@ -141,8 +146,8 @@ func TestReload_FailedSwap_IncrementsFailureCounter(t *testing.T) {
 		Compiled:    invalidSeclang,
 	}, logr.Discard())
 
-	assert.Equal(t, float64(0), gatherCounter(t, reg, "coraza_engine_waf_reload_total", "result", "success"))
-	assert.Equal(t, float64(1), gatherCounter(t, reg, "coraza_engine_waf_reload_total", "result", "failure"))
+	assert.Equal(t, float64(0), gatherCounter(t, reg, "success"))
+	assert.Equal(t, float64(1), gatherCounter(t, reg, "failure"))
 
 	st := provider.State()
 	assert.Equal(t, "sha-start", st.SHA256, "SHA must not change on parse failure")
@@ -173,8 +178,8 @@ func TestReload_SuccessThenFailure(t *testing.T) {
 		Compiled:    invalidSeclang,
 	}, logr.Discard())
 
-	assert.Equal(t, float64(1), gatherCounter(t, reg, "coraza_engine_waf_reload_total", "result", "success"))
-	assert.Equal(t, float64(1), gatherCounter(t, reg, "coraza_engine_waf_reload_total", "result", "failure"))
+	assert.Equal(t, float64(1), gatherCounter(t, reg, "success"))
+	assert.Equal(t, float64(1), gatherCounter(t, reg, "failure"))
 
 	// WAF must still be the one from the successful swap.
 	st := provider.State()
@@ -309,7 +314,7 @@ func TestReload_StatusEndpoint_PopulatesLastError(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, rr.Code)
 
-	var body map[string]interface{}
+	var body map[string]any
 	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &body))
 	lastErr, ok := body["lastError"].(string)
 	require.True(t, ok, "lastError field must be present in JSON")
@@ -317,4 +322,3 @@ func TestReload_StatusEndpoint_PopulatesLastError(t *testing.T) {
 	// SHA must still be the original.
 	assert.Equal(t, "sha-start", body["sha256"])
 }
-

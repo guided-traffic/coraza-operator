@@ -123,6 +123,88 @@ lint-fix: golangci-lint ## Run golangci-lint linter and perform fixes
 lint-config: golangci-lint ## Verify golangci-lint linter configuration
 	"$(GOLANGCI_LINT)" config verify
 
+##@ Coverage
+
+COVERAGE_DIR ?= coverage
+
+.PHONY: test-coverage
+test-coverage: manifests generate setup-envtest ## Run all non-e2e tests with coverage into $(COVERAGE_DIR)/.
+	@mkdir -p "$(COVERAGE_DIR)"
+	KUBEBUILDER_ASSETS="$(shell "$(ENVTEST)" use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" \
+		go test $$(go list ./... | grep -v /e2e) -covermode=atomic -coverprofile="$(COVERAGE_DIR)/coverage.out"
+	go tool cover -func="$(COVERAGE_DIR)/coverage.out" > "$(COVERAGE_DIR)/coverage.txt"
+	go tool cover -html="$(COVERAGE_DIR)/coverage.out" -o "$(COVERAGE_DIR)/coverage.html"
+	@grep "total:" "$(COVERAGE_DIR)/coverage.txt"
+
+.PHONY: coverage-json
+coverage-json: ## Generate the shields.io coverage badge JSON from $(COVERAGE_DIR)/coverage.txt.
+	@mkdir -p .github/badges
+	@COVERAGE=$$(grep "total:" "$(COVERAGE_DIR)/coverage.txt" | awk '{print $$3}' | sed 's/%//'); \
+	COLOR=$$(awk -v c="$$COVERAGE" 'BEGIN { if (c >= 90) print "brightgreen"; else if (c >= 80) print "green"; else if (c >= 70) print "yellow"; else if (c >= 60) print "orange"; else print "red" }'); \
+	printf '{\n  "schemaVersion": 1,\n  "label": "coverage",\n  "message": "%s%%",\n  "color": "%s"\n}\n' "$$COVERAGE" "$$COLOR" > .github/badges/coverage.json
+	@cat .github/badges/coverage.json
+
+##@ Security
+
+# -exclude-generated skips proto/waf/v1/*.pb.go (generated unsafe pointer use).
+# -exclude-dir=test skips the e2e scaffolding in test/utils, which shells out to
+# kubectl/make by design; it is never built into a shipped binary.
+# -nosec-require-rules forces every #nosec annotation to name the rule it waives,
+# so a blanket "#nosec" cannot silently disable the whole scanner for a line.
+.PHONY: gosec
+gosec: ## Run the gosec security scanner.
+	@command -v gosec >/dev/null 2>&1 || go install github.com/securego/gosec/v2/cmd/gosec@$(GOSEC_VERSION)
+	GOFLAGS="-buildvcs=false -p=$(GOSEC_CONCURRENCY)" GOMEMLIMIT=$(GOSEC_MEMLIMIT) \
+		gosec -concurrency=$(GOSEC_CONCURRENCY) \
+			-exclude-generated -exclude-dir=test -nosec-require-rules ./...
+
+.PHONY: vuln
+vuln: ## Check dependencies and stdlib for known vulnerabilities.
+	@command -v govulncheck >/dev/null 2>&1 || go install golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION)
+	GOFLAGS="-buildvcs=false" govulncheck ./...
+
+##@ Quality
+
+.PHONY: cyclo
+cyclo: ## Fail if any function exceeds the cyclomatic complexity threshold.
+	@command -v gocyclo >/dev/null 2>&1 || go install github.com/fzipp/gocyclo/cmd/gocyclo@$(GOCYCLO_VERSION)
+	@out="$$(gocyclo -over $(CYCLO_THRESHOLD) -ignore '$(CYCLO_IGNORE)' .)"; \
+	if [ -n "$$out" ]; then \
+		echo "Functions above complexity threshold $(CYCLO_THRESHOLD):"; \
+		echo "$$out"; \
+		exit 1; \
+	fi; \
+	echo "All functions are below complexity threshold $(CYCLO_THRESHOLD)"
+
+.PHONY: cyclo-report
+cyclo-report: ## Show the 20 most complex functions.
+	@command -v gocyclo >/dev/null 2>&1 || go install github.com/fzipp/gocyclo/cmd/gocyclo@$(GOCYCLO_VERSION)
+	@gocyclo -top 20 -ignore '$(CYCLO_IGNORE)' .
+
+##@ Code Generation
+
+HELM_CHART_DIR ?= charts/coraza-operator
+HELM_CRD_DIR = $(HELM_CHART_DIR)/templates/crds
+
+# Single source of truth for CRDs is config/crd/bases/. The chart copies are
+# generated, never hand-edited: a stale chart CRD would ship an API contract
+# that no longer matches api/v1/ to end-user clusters. The chart-level labels
+# are re-injected here so the generated copy keeps them without manual edits.
+.PHONY: sync-helm-crd
+sync-helm-crd: ## Sync generated CRDs from config/crd/bases/ into the Helm chart.
+	@mkdir -p "$(HELM_CRD_DIR)"
+	@for crd in config/crd/bases/*.yaml; do \
+		[ -f "$$crd" ] || continue; \
+		target="$(HELM_CRD_DIR)/$$(basename "$$crd" .yaml | sed 's/.*_//').yaml"; \
+		{ echo '{{- if .Values.installCRDs }}'; \
+		  awk '!done && /^  name: / { print; print "  labels:"; print "    {{- include \"coraza-operator.labels\" . | nindent 4 }}"; done = 1; next } { print }' "$$crd"; \
+		  echo '{{- end }}'; } > "$$target"; \
+		echo "synced $$crd -> $$target"; \
+	done
+
+.PHONY: generate-all
+generate-all: manifests generate sync-helm-crd ## Regenerate CRDs, DeepCopy code and sync the Helm chart. Run after any api/v1/ change.
+
 ##@ Build
 
 .PHONY: build
@@ -208,7 +290,9 @@ ENVTEST ?= $(LOCALBIN)/setup-envtest
 GOLANGCI_LINT = $(LOCALBIN)/golangci-lint
 
 ## Tool Versions
+# renovate: datasource=go depName=sigs.k8s.io/kustomize/kustomize/v5
 KUSTOMIZE_VERSION ?= v5.8.1
+# renovate: datasource=go depName=sigs.k8s.io/controller-tools/cmd/controller-gen
 CONTROLLER_TOOLS_VERSION ?= v0.20.1
 
 #ENVTEST_VERSION is the version of controller-runtime release branch to fetch the envtest setup script (i.e. release-0.20)
@@ -221,7 +305,24 @@ ENVTEST_K8S_VERSION ?= $(shell v='$(call gomodver,k8s.io/api)'; \
   [ -n "$$v" ] || { echo "Set ENVTEST_K8S_VERSION manually (k8s.io/api replace has no tag)" >&2; exit 1; }; \
   printf '%s\n' "$$v" | sed -E 's/^v?[0-9]+\.([0-9]+).*/1.\1/')
 
+# renovate: datasource=go depName=github.com/golangci/golangci-lint/v2/cmd/golangci-lint
 GOLANGCI_LINT_VERSION ?= v2.11.4
+# renovate: datasource=go depName=github.com/fzipp/gocyclo/cmd/gocyclo
+GOCYCLO_VERSION ?= v0.6.0
+# renovate: datasource=go depName=github.com/securego/gosec/v2/cmd/gosec
+GOSEC_VERSION ?= v2.28.0
+# renovate: datasource=go depName=golang.org/x/vuln/cmd/govulncheck
+GOVULNCHECK_VERSION ?= v1.7.0
+
+# gosec is memory hungry on large packages; cap it so it does not evict other
+# jobs on shared self-hosted runners.
+GOSEC_CONCURRENCY ?= 4
+GOSEC_MEMLIMIT ?= 1GiB
+
+# Cyclomatic complexity gate. Generated code and tests are excluded.
+CYCLO_THRESHOLD ?= 15
+CYCLO_IGNORE ?= _test.go|zz_generated|proto/waf
+
 .PHONY: kustomize
 kustomize: $(KUSTOMIZE) ## Download kustomize locally if necessary.
 $(KUSTOMIZE): $(LOCALBIN)

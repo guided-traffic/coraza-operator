@@ -43,8 +43,13 @@ SecRule REQUEST_URI "@contains /attack" "id:1,phase:1,deny,status:403"
 `
 
 // counterValue reads the current float value of a CounterVec label combination.
-func counterValue(t *testing.T, reg *prometheus.Registry, metricName, labelName, labelVal string) float64 {
+func counterValue(t *testing.T, reg *prometheus.Registry, labelVal string) float64 {
 	t.Helper()
+
+	const (
+		metricName = "coraza_engine_requests_total"
+		labelName  = "outcome"
+	)
 	mfs, err := reg.Gather()
 	require.NoError(t, err)
 	for _, mf := range mfs {
@@ -101,7 +106,7 @@ func TestProxy_AllowedRequest(t *testing.T) {
 	assert.Equal(t, http.StatusOK, rr.Code)
 	assert.Contains(t, rr.Body.String(), "hello from upstream")
 
-	allowed := counterValue(t, reg, "coraza_engine_requests_total", "outcome", "allowed")
+	allowed := counterValue(t, reg, "allowed")
 	assert.Equal(t, float64(1), allowed, "allowed counter must be 1")
 }
 
@@ -129,10 +134,10 @@ func TestProxy_BlockedRequest(t *testing.T) {
 	assert.Equal(t, http.StatusForbidden, rr.Code, "should be 403 in Blocking mode")
 	assert.False(t, upstreamHit, "upstream must NOT be hit when request is blocked")
 
-	blocked := counterValue(t, reg, "coraza_engine_requests_total", "outcome", "blocked")
+	blocked := counterValue(t, reg, "blocked")
 	assert.Equal(t, float64(1), blocked, "blocked counter must be 1")
 
-	allowed := counterValue(t, reg, "coraza_engine_requests_total", "outcome", "allowed")
+	allowed := counterValue(t, reg, "allowed")
 	assert.Equal(t, float64(0), allowed, "allowed counter must be 0")
 }
 
@@ -162,9 +167,9 @@ func TestProxy_DetectionMode(t *testing.T) {
 	assert.Equal(t, http.StatusOK, rr.Code, "Detection mode must pass through upstream response")
 	assert.True(t, upstreamHit, "upstream MUST be hit in Detection mode")
 
-	blocked := counterValue(t, reg, "coraza_engine_requests_total", "outcome", "blocked")
+	blocked := counterValue(t, reg, "blocked")
 	assert.Equal(t, float64(0), blocked, "blocked counter must be 0 in detection mode")
 
-	allowed := counterValue(t, reg, "coraza_engine_requests_total", "outcome", "allowed")
+	allowed := counterValue(t, reg, "allowed")
 	assert.Equal(t, float64(1), allowed, "allowed counter must be 1 in detection mode")
 }
