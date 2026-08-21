@@ -6,7 +6,7 @@ on:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-  GO_VERSION: '1.26.6'
+  GO_VERSION: '1.27.0'
   HELM_VERSION: 'v4.2.3'
   CHART_DIR: charts/coraza-operator
   PAGES_URL: https://guided-traffic.github.io/coraza-operator/

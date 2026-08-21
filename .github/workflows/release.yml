@@ -22,7 +22,7 @@ env:
   # Pinned rather than taken from go.mod: go.mod carries the language version,
   # this is the toolchain CI builds with. Keeping it current is what closes
   # stdlib CVEs reported by govulncheck.
-  GO_VERSION: '1.26.6'
+  GO_VERSION: '1.27.0'
   # Matches k8s.io/api v0.35.x in go.mod so envtest and Kind agree with the
   # API types the operator compiles against.
   KUBERNETES_VERSION: '1.35.5'
