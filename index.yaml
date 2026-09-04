@@ -2,8 +2,28 @@ apiVersion: v1
 entries:
   coraza-operator:
   - apiVersion: v2
+    appVersion: 0.1.9
+    created: "2026-09-04T07:07:46.900903601Z"
+    description: Kubernetes operator for Coraza WAF engine lifecycle management
+    digest: de010feee1690f4965202d9e2336d4332502b57088ceea3add48dba371a6ffac
+    home: https://github.com/guided-traffic/coraza-operator
+    keywords:
+    - waf
+    - coraza
+    - security
+    maintainers:
+    - email: mail@hans-fischer.com
+      name: Guided Traffic GmbH
+    name: coraza-operator
+    sources:
+    - https://github.com/guided-traffic/coraza-operator
+    type: application
+    urls:
+    - https://guided-traffic.github.io/coraza-operator/coraza-operator-0.1.9.tgz
+    version: 0.1.9
+  - apiVersion: v2
     appVersion: 0.1.8
-    created: "2026-08-29T08:45:16.351106194Z"
+    created: "2026-09-04T07:07:46.900472005Z"
     description: Kubernetes operator for Coraza WAF engine lifecycle management
     digest: 89bfb0744dd8d393b4662d5d878b4afd059849e42a3bca8bfbe7925e2f7e0616
     home: https://github.com/guided-traffic/coraza-operator
@@ -23,7 +43,7 @@ entries:
     version: 0.1.8
   - apiVersion: v2
     appVersion: 0.1.7
-    created: "2026-08-29T08:45:16.350711997Z"
+    created: "2026-09-04T07:07:46.899274059Z"
     description: Kubernetes operator for Coraza WAF engine lifecycle management
     digest: 1980e600c57a09aa1fe1aa1da0f52ee82f194091b967d65fdeaa2321de327b27
     home: https://github.com/guided-traffic/coraza-operator
@@ -43,7 +63,7 @@ entries:
     version: 0.1.7
   - apiVersion: v2
     appVersion: 0.1.6
-    created: "2026-08-29T08:45:16.35026931Z"
+    created: "2026-09-04T07:07:46.898647273Z"
     description: Kubernetes operator for Coraza WAF engine lifecycle management
     digest: 1b9903befb5d7649448df3241e9ef5d43770ec761596dae091a7479ab786fc42
     home: https://github.com/guided-traffic/coraza-operator
@@ -63,7 +83,7 @@ entries:
     version: 0.1.6
   - apiVersion: v2
     appVersion: 0.1.5
-    created: "2026-08-29T08:45:16.348850627Z"
+    created: "2026-09-04T07:07:46.898242968Z"
     description: Kubernetes operator for Coraza WAF engine lifecycle management
     digest: bf13852c97c33e3e203cc56f2c795b9d4dba979786271a292759b0f9a3271beb
     home: https://github.com/guided-traffic/coraza-operator
@@ -83,7 +103,7 @@ entries:
     version: 0.1.5
   - apiVersion: v2
     appVersion: 0.1.4
-    created: "2026-08-29T08:45:16.348406537Z"
+    created: "2026-09-04T07:07:46.897824406Z"
     description: Kubernetes operator for Coraza WAF engine lifecycle management
     digest: 0872a7fd8886e53614cfcd5f2a70c29c4716566909d618f4af2c6b128a303515
     home: https://github.com/guided-traffic/coraza-operator
@@ -103,7 +123,7 @@ entries:
     version: 0.1.4
   - apiVersion: v2
     appVersion: 0.1.3
-    created: "2026-08-29T08:45:16.347965402Z"
+    created: "2026-09-04T07:07:46.89731346Z"
     description: Kubernetes operator for Coraza WAF engine lifecycle management
     digest: a69e6c93f5c0c5d2fddad01ad702932666abc4f145932a7793256da11e6cdeed
     home: https://github.com/guided-traffic/coraza-operator
@@ -123,7 +143,7 @@ entries:
     version: 0.1.3
   - apiVersion: v2
     appVersion: 0.1.2
-    created: "2026-08-29T08:45:16.34750406Z"
+    created: "2026-09-04T07:07:46.896875421Z"
     description: Kubernetes operator for Coraza WAF engine lifecycle management
     digest: 8b4a37caa792abeaffccb6e1d95e32bfc124573c2f3b525e278c7672a244086b
     home: https://github.com/guided-traffic/coraza-operator
@@ -143,7 +163,7 @@ entries:
     version: 0.1.2
   - apiVersion: v2
     appVersion: 0.1.1
-    created: "2026-08-29T08:45:16.346966353Z"
+    created: "2026-09-04T07:07:46.89648348Z"
     description: Kubernetes operator for Coraza WAF engine lifecycle management
     digest: 1b81e68d6e5334b2c06a081583b95045eb42b6986ca49103781252f46da3444a
     home: https://github.com/guided-traffic/coraza-operator
@@ -163,7 +183,7 @@ entries:
     version: 0.1.1
   - apiVersion: v2
     appVersion: 0.1.0
-    created: "2026-08-29T08:45:16.346403357Z"
+    created: "2026-09-04T07:07:46.896115284Z"
     description: Kubernetes operator for Coraza WAF engine lifecycle management
     digest: cf92fd7efb2237f0c2a3406df919cf7b91c1fe84947a10d98dae6f8601a06f04
     home: https://github.com/guided-traffic/coraza-operator
@@ -181,4 +201,4 @@ entries:
     urls:
     - https://guided-traffic.github.io/coraza-operator/coraza-operator-0.1.0.tgz
     version: 0.1.0
-generated: "2026-08-29T08:45:16.345717441Z"
+generated: "2026-09-04T07:07:46.895559141Z"
