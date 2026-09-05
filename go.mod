@@ -1,6 +1,6 @@
 module github.com/guided-traffic/coraza-operator
 
-go 1.26.6
+go 1.27
 
 require (
 	github.com/corazawaf/coraza/v3 v3.7.0
@@ -39,22 +39,19 @@ require (
 	github.com/go-openapi/jsonreference v0.20.2 // indirect
 	github.com/go-openapi/swag v0.23.0 // indirect
 	github.com/go-task/slim-sprig/v3 v3.0.0 // indirect
-	github.com/goccy/go-json v0.10.5 // indirect
-	github.com/goccy/go-yaml v1.18.0 // indirect
+	github.com/goccy/go-yaml v1.19.2 // indirect
 	github.com/google/btree v1.1.3 // indirect
 	github.com/google/cel-go v0.26.0 // indirect
 	github.com/google/gnostic-models v0.7.0 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/google/pprof v0.0.0-20260903180319-d6c3cb2f37ec // indirect
 	github.com/google/uuid v1.6.0 // indirect
-	github.com/gotnospirit/makeplural v0.0.0-20180622080156-a5f48d94d976 // indirect
-	github.com/gotnospirit/messageformat v0.0.0-20221001023931-dfe49f1eb092 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.26.3 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/josharian/intern v1.0.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
-	github.com/kaptinlin/go-i18n v0.1.4 // indirect
-	github.com/kaptinlin/jsonschema v0.4.6 // indirect
+	github.com/kaptinlin/jsonpointer v0.4.28 // indirect
+	github.com/kaptinlin/jsonschema v0.9.9 // indirect
 	github.com/magefile/mage v1.17.0 // indirect
 	github.com/mailru/easyjson v0.7.7 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
