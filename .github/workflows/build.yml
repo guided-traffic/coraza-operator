@@ -138,6 +138,17 @@ jobs:
       contents: write
       pages: write
     steps:
+      # GitHub App installation token (guided-traffic-automation), scoped to this
+      # repository; expires after 1 h and is revoked at the end of the job. Only
+      # "Publish chart to gh-pages" uses it.
+      - name: Create GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ secrets.APP_CLIENT_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          permission-contents: write  # clone and push the gh-pages branch
+
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -203,16 +214,16 @@ jobs:
       # sister valkey-operator project:
       #   helm repo add coraza-operator https://guided-traffic.github.io/coraza-operator/
       #
-      # BOT_PAT is used instead of the persisted checkout credentials because the
-      # publish happens in a separate clone of the gh-pages branch. The token
-      # only ever appears in the remote URL, which Actions masks in logs.
+      # The GitHub App token is used instead of the persisted checkout credentials
+      # because the publish happens in a separate clone of the gh-pages branch. The
+      # token only ever appears in the remote URL, which Actions masks in logs.
       - name: Publish chart to gh-pages
         env:
-          BOT_PAT: ${{ secrets.BOT_PAT }}
+          APP_TOKEN: ${{ steps.app-token.outputs.token }}
           CHART_TGZ: ${{ steps.package.outputs.chart_tgz }}
         run: |
           set -euo pipefail
-          REPO_URL="https://x-access-token:${BOT_PAT}@github.com/${GITHUB_REPOSITORY}.git"
+          REPO_URL="https://x-access-token:${APP_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           WORK=/tmp/gh-pages
           rm -rf "$WORK"
 
