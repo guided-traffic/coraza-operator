@@ -312,7 +312,7 @@ GOCYCLO_VERSION ?= v0.6.0
 # renovate: datasource=go depName=github.com/securego/gosec/v2/cmd/gosec
 GOSEC_VERSION ?= v2.28.0
 # renovate: datasource=go depName=golang.org/x/vuln/cmd/govulncheck
-GOVULNCHECK_VERSION ?= v1.7.0
+GOVULNCHECK_VERSION ?= v1.8.0
 
 # gosec is memory hungry on large packages; cap it so it does not evict other
 # jobs on shared self-hosted runners.
