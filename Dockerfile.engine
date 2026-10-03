@@ -2,7 +2,7 @@
 ARG GOOS=linux
 ARG GOARCH=amd64
 
-FROM --platform=${BUILDPLATFORM:-linux/amd64} golang:1.26.6 AS builder
+FROM --platform=${BUILDPLATFORM:-linux/amd64} golang:1.27.1 AS builder
 
 ARG GOOS
 ARG GOARCH
