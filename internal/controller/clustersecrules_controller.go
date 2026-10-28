@@ -65,7 +65,7 @@ func (r *ClusterSecRulesReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	}
 
 	bundle, err := compiler.Compile([]compiler.Source{
-		{Kind: "ClusterSecRules", Name: req.Name, Body: csr.Spec.Rules},
+		{Kind: string(wafv1.SourceRefKindClusterSecRules), Name: req.Name, Body: csr.Spec.Rules},
 	})
 	if err != nil {
 		setConditionDegraded(&statusPatch.Status.Conditions, csr.Generation, wafv1.ReasonInvalidSpec, err.Error())

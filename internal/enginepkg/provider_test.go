@@ -32,6 +32,8 @@ const (
 SecRule REQUEST_URI "@contains /attack" "id:1,phase:1,deny,status:403"
 `
 	invalidSeclang = "THIS IS NOT VALID SECLANG\n"
+	// badSHA is the bundle hash paired with invalidSeclang.
+	badSHA = "sha-bad"
 )
 
 // TestAtomicProvider_NewProvider verifies that a freshly-created provider
@@ -80,7 +82,7 @@ func TestAtomicProvider_Swap_InvalidSeclang(t *testing.T) {
 	require.NoError(t, err)
 	p := enginepkg.NewAtomicProvider(initial, "sha-original")
 
-	err = p.Swap("rs-bad", "sha-bad", invalidSeclang)
+	err = p.Swap("rs-bad", badSHA, invalidSeclang)
 	require.Error(t, err, "Swap with invalid SecLang must return an error")
 
 	// WAF must still be the original (SHA unchanged in state).
@@ -101,7 +103,7 @@ func TestAtomicProvider_Swap_InvalidThenValid(t *testing.T) {
 	p := enginepkg.NewAtomicProvider(initial, "sha-v1")
 
 	// First swap: fail.
-	require.Error(t, p.Swap("bad", "sha-bad", invalidSeclang))
+	require.Error(t, p.Swap("bad", badSHA, invalidSeclang))
 
 	// Second swap: succeed.
 	require.NoError(t, p.Swap("rs-v2", "sha-v2", validSeclang))
@@ -145,7 +147,7 @@ func TestAtomicProvider_Concurrent(t *testing.T) {
 			for j := range iters {
 				if j%3 == 0 {
 					// Inject an invalid bundle — WAF must not be replaced.
-					_ = p.Swap("bad", "sha-bad", invalidSeclang)
+					_ = p.Swap("bad", badSHA, invalidSeclang)
 				} else {
 					_ = p.Swap("rs", "sha-ok", validSeclang)
 				}

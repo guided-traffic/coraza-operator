@@ -40,6 +40,9 @@ import (
 // These tests use Ginkgo (BDD-style Go testing framework). Refer to
 // http://onsi.github.io/ginkgo/ to learn more about Ginkgo.
 
+// testNamespace is the namespace the controller tests create their resources in.
+const testNamespace = "default"
+
 var (
 	ctx       context.Context
 	cancel    context.CancelFunc

@@ -80,7 +80,3 @@ type SecRulesList struct {
 	metav1.ListMeta `json:"metadata,omitzero"`
 	Items           []SecRules `json:"items"`
 }
-
-func init() {
-	SchemeBuilder.Register(&SecRules{}, &SecRulesList{})
-}

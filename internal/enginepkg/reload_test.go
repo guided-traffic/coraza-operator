@@ -142,7 +142,7 @@ func TestReload_FailedSwap_IncrementsFailureCounter(t *testing.T) {
 
 	simulateOnBundle(provider, m, enginepkg.Bundle{
 		RuleSetName: "rs-bad",
-		SHA256:      "sha-bad",
+		SHA256:      badSHA,
 		Compiled:    invalidSeclang,
 	}, logr.Discard())
 
@@ -174,7 +174,7 @@ func TestReload_SuccessThenFailure(t *testing.T) {
 	// Failure.
 	simulateOnBundle(provider, m, enginepkg.Bundle{
 		RuleSetName: "rs-bad",
-		SHA256:      "sha-bad",
+		SHA256:      badSHA,
 		Compiled:    invalidSeclang,
 	}, logr.Discard())
 
@@ -255,7 +255,7 @@ func TestReload_InvalidBundle_OldWAFStillBlocks(t *testing.T) {
 	// Publish an invalid bundle.
 	simulateOnBundle(provider, m, enginepkg.Bundle{
 		RuleSetName: "bad",
-		SHA256:      "sha-bad",
+		SHA256:      badSHA,
 		Compiled:    invalidSeclang,
 	}, logr.Discard())
 
@@ -283,7 +283,7 @@ func TestReload_StatusEndpoint_PopulatesLastError(t *testing.T) {
 	// Inject a bad bundle.
 	simulateOnBundle(provider, m, enginepkg.Bundle{
 		RuleSetName: "bad",
-		SHA256:      "sha-bad",
+		SHA256:      badSHA,
 		Compiled:    invalidSeclang,
 	}, logr.Discard())
 

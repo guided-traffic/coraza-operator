@@ -57,6 +57,9 @@ import (
 
 const e2eBufSize = 1 << 20
 
+// bufconnServerName is the SAN of the test server cert and the client's ServerName.
+const bufconnServerName = "bufconn"
+
 // TestEnrollThenSubscribe is the end-to-end integration test that exercises:
 //  1. Engine calls Enroll (without a client cert) — bootstraps via SA token.
 //  2. Engine calls Subscribe (with the enrolled client cert) — receives a bundle.
@@ -84,7 +87,7 @@ func TestEnrollThenSubscribe(t *testing.T) {
 
 	// Issue a server cert for the bufconn listener (SAN = "bufconn").
 	serverCertPEM, serverKeyPEM, err := ca.IssueServerCert(
-		[]string{"bufconn", "localhost"},
+		[]string{bufconnServerName, "localhost"},
 		[]net.IP{net.ParseIP("127.0.0.1")},
 	)
 	require.NoError(t, err)
@@ -213,7 +216,7 @@ func TestEnrollThenSubscribe(t *testing.T) {
 			Certificates: []tls.Certificate{clientCert},
 			RootCAs:      caPool,
 			// ServerName must match one of the server cert's SANs.
-			ServerName: "bufconn",
+			ServerName: bufconnServerName,
 			MinVersion: tls.VersionTLS13,
 		}
 
@@ -253,7 +256,7 @@ func TestEnrollThenSubscribe(t *testing.T) {
 		subscribeTLS := &tls.Config{
 			Certificates: []tls.Certificate{clientCert},
 			RootCAs:      caPool,
-			ServerName:   "bufconn",
+			ServerName:   bufconnServerName,
 			MinVersion:   tls.VersionTLS13,
 		}
 
@@ -300,7 +303,7 @@ func TestEnrollThenSubscribe(t *testing.T) {
 		// Connect with TLS but no client cert.
 		noClientTLS := &tls.Config{
 			RootCAs:    caPool,
-			ServerName: "bufconn",
+			ServerName: bufconnServerName,
 			MinVersion: tls.VersionTLS13,
 		}
 

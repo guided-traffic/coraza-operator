@@ -38,6 +38,8 @@ import (
 
 const bufSize = 1 << 20 // 1 MiB
 
+const testNS = "ns1"
+
 // setup starts a gRPC server backed by a real rulestore over a bufconn listener.
 // Returns a connected client and a cancel func that shuts the server down.
 func setup(t *testing.T) (wafv1pb.ConfigServiceClient, *rulestore.Store, context.CancelFunc) {
@@ -126,7 +128,7 @@ func TestSubscribe_InvalidArgument_EmptyName(t *testing.T) {
 
 	ctx := context.Background()
 	stream, err := client.Subscribe(ctx, &wafv1pb.SubscribeRequest{
-		EngineNamespace: "ns1",
+		EngineNamespace: testNS,
 		EngineName:      "",
 	})
 	require.NoError(t, err)
@@ -145,19 +147,19 @@ func TestSubscribe_ReceivesPublishedBundle(t *testing.T) {
 	ctx := t.Context()
 
 	stream, err := client.Subscribe(ctx, &wafv1pb.SubscribeRequest{
-		EngineNamespace: "ns1",
+		EngineNamespace: testNS,
 		EngineName:      "e1",
 	})
 	require.NoError(t, err)
 
 	// Publish first bundle after subscribe.
-	store.Publish("ns1", "e1", bundle("sha-001"))
+	store.Publish(testNS, "e1", bundle("sha-001"))
 	msg := recv(t, stream)
 	require.NotNil(t, msg)
 	assert.Equal(t, "sha-001", msg.Sha256)
 
 	// Publish second bundle.
-	store.Publish("ns1", "e1", bundle("sha-002"))
+	store.Publish(testNS, "e1", bundle("sha-002"))
 	msg = recv(t, stream)
 	require.NotNil(t, msg)
 	assert.Equal(t, "sha-002", msg.Sha256)
@@ -168,12 +170,12 @@ func TestSubscribe_ReceivesInitialBundleBeforeSubscribe(t *testing.T) {
 	defer cancel()
 
 	// Publish before subscribing.
-	store.Publish("ns1", "e1", bundle("pre-existing"))
+	store.Publish(testNS, "e1", bundle("pre-existing"))
 
 	ctx := t.Context()
 
 	stream, err := client.Subscribe(ctx, &wafv1pb.SubscribeRequest{
-		EngineNamespace: "ns1",
+		EngineNamespace: testNS,
 		EngineName:      "e1",
 	})
 	require.NoError(t, err)
@@ -190,7 +192,7 @@ func TestSubscribe_CancelContext_CleanDisconnect(t *testing.T) {
 	ctx, ctxCancel := context.WithCancel(context.Background())
 
 	stream, err := client.Subscribe(ctx, &wafv1pb.SubscribeRequest{
-		EngineNamespace: "ns1",
+		EngineNamespace: testNS,
 		EngineName:      "e1",
 	})
 	require.NoError(t, err)

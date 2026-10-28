@@ -55,6 +55,14 @@ import (
 
 const enrollBufSize = 1 << 20
 
+// The Engine every enrollment test enrolls as, and the SA token it sends. The token value
+// is never checked: the TokenReview reactor installed by each test decides the outcome.
+const (
+	enrollNS   = "myns"
+	enrollName = "myengine"
+	validToken = "valid-token"
+)
+
 // tokenReviewReactor returns a reactor that always authenticates as the given username.
 func tokenReviewReactor(authenticatedAs string) k8stesting.ReactionFunc {
 	return func(action k8stesting.Action) (bool, runtime.Object, error) {
@@ -122,15 +130,10 @@ func buildCSR(t *testing.T) (csrDER []byte, priv *ecdsa.PrivateKey) {
 
 // engineCR builds a minimal Engine CR.
 func engineCR() *wafv1.Engine {
-	const (
-		ns   = "myns"
-		name = "myengine"
-	)
-
 	return &wafv1.Engine{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
-			Namespace: ns,
+			Name:      enrollName,
+			Namespace: enrollNS,
 		},
 		Spec: wafv1.EngineSpec{
 			Upstream: wafv1.UpstreamConfig{URL: "http://backend.svc:80"},
@@ -193,9 +196,9 @@ func TestEnroll_Success(t *testing.T) {
 	defer cancel()
 
 	resp, err := client.Enroll(context.Background(), &wafv1pb.EnrollRequest{
-		SaToken:         "valid-token",
-		EngineNamespace: "myns",
-		EngineName:      "myengine",
+		SaToken:         validToken,
+		EngineNamespace: enrollNS,
+		EngineName:      enrollName,
 		CsrDer:          csrDER,
 	})
 	require.NoError(t, err)
@@ -245,8 +248,8 @@ func TestEnroll_WrongToken_PermissionDenied(t *testing.T) {
 
 	_, err := client.Enroll(context.Background(), &wafv1pb.EnrollRequest{
 		SaToken:         "bad-token",
-		EngineNamespace: "myns",
-		EngineName:      "myengine",
+		EngineNamespace: enrollNS,
+		EngineName:      enrollName,
 		CsrDer:          csrDER,
 	})
 	require.Error(t, err)
@@ -280,8 +283,8 @@ func TestEnroll_WrongSAUsername_PermissionDenied(t *testing.T) {
 
 	_, err := client.Enroll(context.Background(), &wafv1pb.EnrollRequest{
 		SaToken:         "mismatched-token",
-		EngineNamespace: "myns",
-		EngineName:      "myengine",
+		EngineNamespace: enrollNS,
+		EngineName:      enrollName,
 		CsrDer:          csrDER,
 	})
 	require.Error(t, err)
@@ -314,9 +317,9 @@ func TestEnroll_EngineCRNotFound_NotFound(t *testing.T) {
 	defer cancel()
 
 	_, err := client.Enroll(context.Background(), &wafv1pb.EnrollRequest{
-		SaToken:         "valid-token",
-		EngineNamespace: "myns",
-		EngineName:      "myengine",
+		SaToken:         validToken,
+		EngineNamespace: enrollNS,
+		EngineName:      enrollName,
 		CsrDer:          csrDER,
 	})
 	require.Error(t, err)
@@ -347,9 +350,9 @@ func TestEnroll_MalformedCSR_InvalidArgument(t *testing.T) {
 	defer cancel()
 
 	_, err := client.Enroll(context.Background(), &wafv1pb.EnrollRequest{
-		SaToken:         "valid-token",
-		EngineNamespace: "myns",
-		EngineName:      "myengine",
+		SaToken:         validToken,
+		EngineNamespace: enrollNS,
+		EngineName:      enrollName,
 		CsrDer:          []byte("not-a-valid-csr"),
 	})
 	require.Error(t, err)

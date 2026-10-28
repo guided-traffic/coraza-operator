@@ -38,7 +38,7 @@ var _ = Describe("ClusterSecRules Controller", func() {
 
 		typeNamespacedName := types.NamespacedName{
 			Name:      resourceName,
-			Namespace: "default", // TODO(user):Modify as needed
+			Namespace: testNamespace, // TODO(user):Modify as needed
 		}
 		clustersecrules := &wafv1.ClusterSecRules{}
 
@@ -49,7 +49,7 @@ var _ = Describe("ClusterSecRules Controller", func() {
 				resource := &wafv1.ClusterSecRules{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      resourceName,
-						Namespace: "default",
+						Namespace: testNamespace,
 					},
 					// TODO(user): Specify other spec details if needed.
 				}

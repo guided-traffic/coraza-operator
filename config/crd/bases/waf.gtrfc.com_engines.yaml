@@ -3,7 +3,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.20.1
+    controller-gen.kubebuilder.io/version: v0.23.0
   name: engines.waf.gtrfc.com
 spec:
   group: waf.gtrfc.com
@@ -90,16 +90,12 @@ spec:
                     type: integer
                 type: object
               mode:
-                allOf:
-                - enum:
-                  - Detection
-                  - Blocking
-                - enum:
-                  - Detection
-                  - Blocking
                 default: Detection
                 description: mode controls whether the WAF operates in Detection or
                   Blocking mode.
+                enum:
+                - Detection
+                - Blocking
                 type: string
               replicas:
                 default: 1
@@ -182,13 +178,10 @@ spec:
                 type: object
                 x-kubernetes-map-type: atomic
               type:
-                allOf:
-                - enum:
-                  - coraza-http
-                - enum:
-                  - coraza-http
                 default: coraza-http
                 description: type identifies the WAF engine implementation.
+                enum:
+                - coraza-http
                 type: string
               upstream:
                 description: upstream configures the backend target the engine proxies

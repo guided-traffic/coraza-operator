@@ -81,8 +81,7 @@ func (r *RuleSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 
 	bundle, err := compiler.Compile(sources)
 	if err != nil {
-		var conflictErr *compiler.ConflictError
-		if errors.As(err, &conflictErr) {
+		if _, ok := errors.AsType[*compiler.ConflictError](err); ok {
 			setConditionDegraded(&statusPatch.Status.Conditions, rs.Generation, wafv1.ReasonRuleConflict, err.Error())
 			clearCondition(&statusPatch.Status.Conditions, wafv1.ConditionReady)
 			clearCondition(&statusPatch.Status.Conditions, wafv1.ConditionProgressing)
@@ -186,7 +185,7 @@ func (r *RuleSetReconciler) collectSources(ctx context.Context, rs *wafv1.RuleSe
 				return nil, "", fmt.Errorf("get SecRules %s/%s: %w", rs.Namespace, ref.Name, err)
 			}
 			sources = append(sources, compiler.Source{
-				Kind: "SecRules",
+				Kind: string(wafv1.SourceRefKindSecRules),
 				Name: ref.Name,
 				Body: sr.Spec.Rules,
 			})
@@ -201,7 +200,7 @@ func (r *RuleSetReconciler) collectSources(ctx context.Context, rs *wafv1.RuleSe
 				return nil, "", fmt.Errorf("get ClusterSecRules %s: %w", ref.Name, err)
 			}
 			sources = append(sources, compiler.Source{
-				Kind: "ClusterSecRules",
+				Kind: string(wafv1.SourceRefKindClusterSecRules),
 				Name: ref.Name,
 				Body: csr.Spec.Rules,
 			})

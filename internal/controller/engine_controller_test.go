@@ -39,7 +39,7 @@ var _ = Describe("Engine Controller", func() {
 
 		typeNamespacedName := types.NamespacedName{
 			Name:      resourceName,
-			Namespace: "default", // TODO(user):Modify as needed
+			Namespace: testNamespace, // TODO(user):Modify as needed
 		}
 		engine := &wafv1.Engine{}
 
@@ -50,7 +50,7 @@ var _ = Describe("Engine Controller", func() {
 				resource := &wafv1.Engine{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      resourceName,
-						Namespace: "default",
+						Namespace: testNamespace,
 					},
 					Spec: wafv1.EngineSpec{
 						RuleSetRef: corev1.LocalObjectReference{Name: "missing-ruleset"},
