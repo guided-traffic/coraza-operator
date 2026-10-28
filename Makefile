@@ -152,23 +152,20 @@ coverage-json: ## Generate the shields.io coverage badge JSON from $(COVERAGE_DI
 # -nosec-require-rules forces every #nosec annotation to name the rule it waives,
 # so a blanket "#nosec" cannot silently disable the whole scanner for a line.
 .PHONY: gosec
-gosec: ## Run the gosec security scanner.
-	@command -v gosec >/dev/null 2>&1 || go install github.com/securego/gosec/v2/cmd/gosec@$(GOSEC_VERSION)
+gosec: gosec-bin ## Run the gosec security scanner.
 	GOFLAGS="-buildvcs=false -p=$(GOSEC_CONCURRENCY)" GOMEMLIMIT=$(GOSEC_MEMLIMIT) \
-		gosec -concurrency=$(GOSEC_CONCURRENCY) \
+		"$(GOSEC)" -concurrency=$(GOSEC_CONCURRENCY) \
 			-exclude-generated -exclude-dir=test -nosec-require-rules ./...
 
 .PHONY: vuln
-vuln: ## Check dependencies and stdlib for known vulnerabilities.
-	@command -v govulncheck >/dev/null 2>&1 || go install golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION)
-	GOFLAGS="-buildvcs=false" govulncheck ./...
+vuln: govulncheck ## Check dependencies and stdlib for known vulnerabilities.
+	GOFLAGS="-buildvcs=false" "$(GOVULNCHECK)" ./...
 
 ##@ Quality
 
 .PHONY: cyclo
-cyclo: ## Fail if any function exceeds the cyclomatic complexity threshold.
-	@command -v gocyclo >/dev/null 2>&1 || go install github.com/fzipp/gocyclo/cmd/gocyclo@$(GOCYCLO_VERSION)
-	@out="$$(gocyclo -over $(CYCLO_THRESHOLD) -ignore '$(CYCLO_IGNORE)' .)"; \
+cyclo: gocyclo ## Fail if any function exceeds the cyclomatic complexity threshold.
+	@out="$$("$(GOCYCLO)" -over $(CYCLO_THRESHOLD) -ignore '$(CYCLO_IGNORE)' .)"; \
 	if [ -n "$$out" ]; then \
 		echo "Functions above complexity threshold $(CYCLO_THRESHOLD):"; \
 		echo "$$out"; \
@@ -177,9 +174,8 @@ cyclo: ## Fail if any function exceeds the cyclomatic complexity threshold.
 	echo "All functions are below complexity threshold $(CYCLO_THRESHOLD)"
 
 .PHONY: cyclo-report
-cyclo-report: ## Show the 20 most complex functions.
-	@command -v gocyclo >/dev/null 2>&1 || go install github.com/fzipp/gocyclo/cmd/gocyclo@$(GOCYCLO_VERSION)
-	@gocyclo -top 20 -ignore '$(CYCLO_IGNORE)' .
+cyclo-report: gocyclo ## Show the 20 most complex functions.
+	@"$(GOCYCLO)" -top 20 -ignore '$(CYCLO_IGNORE)' .
 
 ##@ Code Generation
 
@@ -288,12 +284,19 @@ KUSTOMIZE ?= $(LOCALBIN)/kustomize
 CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
 ENVTEST ?= $(LOCALBIN)/setup-envtest
 GOLANGCI_LINT = $(LOCALBIN)/golangci-lint
+GOSEC ?= $(LOCALBIN)/gosec
+GOVULNCHECK ?= $(LOCALBIN)/govulncheck
+GOCYCLO ?= $(LOCALBIN)/gocyclo
+
+# Every tool binary is keyed on its pin and on the Go toolchain that built it:
+# analyzers built by an older toolchain cannot read newer export data.
+GO_TOOLCHAIN := $(shell go env GOVERSION)
 
 ## Tool Versions
 # renovate: datasource=go depName=sigs.k8s.io/kustomize/kustomize/v5
-KUSTOMIZE_VERSION ?= v5.8.1
+KUSTOMIZE_VERSION ?= v5.8.3
 # renovate: datasource=go depName=sigs.k8s.io/controller-tools/cmd/controller-gen
-CONTROLLER_TOOLS_VERSION ?= v0.20.1
+CONTROLLER_TOOLS_VERSION ?= v0.23.0
 
 #ENVTEST_VERSION is the version of controller-runtime release branch to fetch the envtest setup script (i.e. release-0.20)
 ENVTEST_VERSION ?= $(shell v='$(call gomodver,sigs.k8s.io/controller-runtime)'; \
@@ -306,13 +309,13 @@ ENVTEST_K8S_VERSION ?= $(shell v='$(call gomodver,k8s.io/api)'; \
   printf '%s\n' "$$v" | sed -E 's/^v?[0-9]+\.([0-9]+).*/1.\1/')
 
 # renovate: datasource=go depName=github.com/golangci/golangci-lint/v2/cmd/golangci-lint
-GOLANGCI_LINT_VERSION ?= v2.11.4
+GOLANGCI_LINT_VERSION ?= v2.15.0
 # renovate: datasource=go depName=github.com/fzipp/gocyclo/cmd/gocyclo
 GOCYCLO_VERSION ?= v0.6.0
 # renovate: datasource=go depName=github.com/securego/gosec/v2/cmd/gosec
-GOSEC_VERSION ?= v2.28.0
+GOSEC_VERSION ?= v2.30.0
 # renovate: datasource=go depName=golang.org/x/vuln/cmd/govulncheck
-GOVULNCHECK_VERSION ?= v1.7.0
+GOVULNCHECK_VERSION ?= v1.9.0
 
 # gosec is memory hungry on large packages; cap it so it does not evict other
 # jobs on shared self-hosted runners.
@@ -323,14 +326,19 @@ GOSEC_MEMLIMIT ?= 1GiB
 CYCLO_THRESHOLD ?= 15
 CYCLO_IGNORE ?= _test.go|zz_generated|proto/waf
 
+# Tool rules depend on FORCE so go-install-tool always decides: an existing
+# binary built for another pin or toolchain is replaced, not silently reused.
+.PHONY: FORCE
+FORCE:
+
 .PHONY: kustomize
 kustomize: $(KUSTOMIZE) ## Download kustomize locally if necessary.
-$(KUSTOMIZE): $(LOCALBIN)
+$(KUSTOMIZE): $(LOCALBIN) FORCE
 	$(call go-install-tool,$(KUSTOMIZE),sigs.k8s.io/kustomize/kustomize/v5,$(KUSTOMIZE_VERSION))
 
 .PHONY: controller-gen
 controller-gen: $(CONTROLLER_GEN) ## Download controller-gen locally if necessary.
-$(CONTROLLER_GEN): $(LOCALBIN)
+$(CONTROLLER_GEN): $(LOCALBIN) FORCE
 	$(call go-install-tool,$(CONTROLLER_GEN),sigs.k8s.io/controller-tools/cmd/controller-gen,$(CONTROLLER_TOOLS_VERSION))
 
 .PHONY: setup-envtest
@@ -343,33 +351,55 @@ setup-envtest: envtest ## Download the binaries required for ENVTEST in the loca
 
 .PHONY: envtest
 envtest: $(ENVTEST) ## Download setup-envtest locally if necessary.
-$(ENVTEST): $(LOCALBIN)
+$(ENVTEST): $(LOCALBIN) FORCE
 	$(call go-install-tool,$(ENVTEST),sigs.k8s.io/controller-runtime/tools/setup-envtest,$(ENVTEST_VERSION))
+
+# The linter is always the custom build with the .custom-gcl.yml plugins.
+# GOLANGCI_LINT_VERSION is its only version pin: it is passed to `custom`, so
+# .custom-gcl.yml carries no version of its own that could drift.
+GOLANGCI_LINT_CUSTOM = $(GOLANGCI_LINT)-custom-$(GOLANGCI_LINT_VERSION)-$(GO_TOOLCHAIN)
 
 .PHONY: golangci-lint
 golangci-lint: $(GOLANGCI_LINT) ## Download golangci-lint locally if necessary.
-$(GOLANGCI_LINT): $(LOCALBIN)
-	$(call go-install-tool,$(GOLANGCI_LINT),github.com/golangci/golangci-lint/v2/cmd/golangci-lint,$(GOLANGCI_LINT_VERSION))
-	@test -f .custom-gcl.yml && { \
-		echo "Building custom golangci-lint with plugins..." && \
-		$(GOLANGCI_LINT) custom --destination $(LOCALBIN) --name golangci-lint-custom && \
-		mv -f $(LOCALBIN)/golangci-lint-custom $(GOLANGCI_LINT); \
-	} || true
+$(GOLANGCI_LINT): $(LOCALBIN) FORCE
+	@[ -f "$(GOLANGCI_LINT_CUSTOM)" ] || { \
+		set -e; \
+		echo "Building custom golangci-lint $(GOLANGCI_LINT_VERSION) with plugins..."; \
+		go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION) custom \
+			--version $(GOLANGCI_LINT_VERSION) --destination "$(LOCALBIN)" --name "$$(basename "$(GOLANGCI_LINT_CUSTOM)")"; \
+	}; \
+	ln -sf "$(GOLANGCI_LINT_CUSTOM)" "$(GOLANGCI_LINT)"
 
-# go-install-tool will 'go install' any package with custom target and name of binary, if it doesn't exist
+.PHONY: gosec-bin
+gosec-bin: $(GOSEC) ## Download gosec locally if necessary.
+$(GOSEC): $(LOCALBIN) FORCE
+	$(call go-install-tool,$(GOSEC),github.com/securego/gosec/v2/cmd/gosec,$(GOSEC_VERSION))
+
+.PHONY: govulncheck
+govulncheck: $(GOVULNCHECK) ## Download govulncheck locally if necessary.
+$(GOVULNCHECK): $(LOCALBIN) FORCE
+	$(call go-install-tool,$(GOVULNCHECK),golang.org/x/vuln/cmd/govulncheck,$(GOVULNCHECK_VERSION))
+
+.PHONY: gocyclo
+gocyclo: $(GOCYCLO) ## Download gocyclo locally if necessary.
+$(GOCYCLO): $(LOCALBIN) FORCE
+	$(call go-install-tool,$(GOCYCLO),github.com/fzipp/gocyclo/cmd/gocyclo,$(GOCYCLO_VERSION))
+
+# go-install-tool will 'go install' any package with custom target and name of binary,
+# unless the binary for this pin and Go toolchain already exists
 # $1 - target path with name of binary
 # $2 - package url which can be installed
 # $3 - specific version of package
 define go-install-tool
-@[ -f "$(1)-$(3)" ] && [ "$$(readlink -- "$(1)" 2>/dev/null)" = "$(1)-$(3)" ] || { \
+@[ -f "$(1)-$(3)-$(GO_TOOLCHAIN)" ] && [ "$$(readlink -- "$(1)" 2>/dev/null)" = "$(1)-$(3)-$(GO_TOOLCHAIN)" ] || { \
 set -e; \
 package=$(2)@$(3) ;\
 echo "Downloading $${package}" ;\
 rm -f "$(1)" ;\
 GOBIN="$(LOCALBIN)" go install $${package} ;\
-mv "$(LOCALBIN)/$$(basename "$(1)")" "$(1)-$(3)" ;\
+mv "$(LOCALBIN)/$$(basename "$(1)")" "$(1)-$(3)-$(GO_TOOLCHAIN)" ;\
 } ;\
-ln -sf "$$(realpath "$(1)-$(3)")" "$(1)"
+ln -sf "$$(realpath "$(1)-$(3)-$(GO_TOOLCHAIN)")" "$(1)"
 endef
 
 define gomodver

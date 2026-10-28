@@ -27,6 +27,8 @@ import (
 	"github.com/guided-traffic/coraza-operator/internal/compiler"
 )
 
+const kindSecRules = "SecRules"
+
 func TestCompile_EmptyList(t *testing.T) {
 	bundle, err := compiler.Compile(nil)
 	require.NoError(t, err)
@@ -46,7 +48,7 @@ func TestCompile_EmptyList_DeterministicHash(t *testing.T) {
 
 func TestCompile_SingleSource_TwoRules(t *testing.T) {
 	src := compiler.Source{
-		Kind: "SecRules",
+		Kind: kindSecRules,
 		Name: "my-rules",
 		Body: `SecRule ARGS "@contains sql" "id:1001,phase:2,deny"
 SecRule REQUEST_HEADERS:User-Agent "@contains bot" "id:1002,phase:1,log"
@@ -63,7 +65,7 @@ SecRule REQUEST_HEADERS:User-Agent "@contains bot" "id:1002,phase:1,log"
 
 func TestCompile_TwoSources_NoConflict_OrderPreserved(t *testing.T) {
 	src1 := compiler.Source{
-		Kind: "SecRules",
+		Kind: kindSecRules,
 		Name: "alpha",
 		Body: `SecRule ARGS "@contains xss" "id:2001,phase:2,deny"
 `,
@@ -88,7 +90,7 @@ func TestCompile_TwoSources_NoConflict_OrderPreserved(t *testing.T) {
 
 func TestCompile_TwoSources_ConflictingRuleID(t *testing.T) {
 	src1 := compiler.Source{
-		Kind: "SecRules",
+		Kind: kindSecRules,
 		Name: "first",
 		Body: `SecRule ARGS "@contains sql" "id:9999,phase:2,deny"
 `,
@@ -115,7 +117,7 @@ func TestCompile_TwoSources_ConflictingRuleID(t *testing.T) {
 
 func TestCompile_WhitespaceAndCommentsDoNotCountAsRules(t *testing.T) {
 	src := compiler.Source{
-		Kind: "SecRules",
+		Kind: kindSecRules,
 		Name: "comments",
 		Body: `
 # This is a comment
@@ -132,7 +134,7 @@ SecAction "id:5001,phase:1,nolog,pass"
 
 func TestCompile_HashIsStableAcrossRuns(t *testing.T) {
 	sources := []compiler.Source{
-		{Kind: "SecRules", Name: "stable", Body: `SecRule ARGS "@contains test" "id:7777,phase:2,deny"` + "\n"},
+		{Kind: kindSecRules, Name: "stable", Body: `SecRule ARGS "@contains test" "id:7777,phase:2,deny"` + "\n"},
 	}
 	b1, err := compiler.Compile(sources)
 	require.NoError(t, err)

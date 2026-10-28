@@ -168,7 +168,3 @@ type EngineList struct {
 	metav1.ListMeta `json:"metadata,omitzero"`
 	Items           []Engine `json:"items"`
 }
-
-func init() {
-	SchemeBuilder.Register(&Engine{}, &EngineList{})
-}

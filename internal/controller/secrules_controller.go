@@ -65,7 +65,7 @@ func (r *SecRulesReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}
 
 	bundle, err := compiler.Compile([]compiler.Source{
-		{Kind: "SecRules", Name: req.Name, Body: sr.Spec.Rules},
+		{Kind: string(wafv1.SourceRefKindSecRules), Name: req.Name, Body: sr.Spec.Rules},
 	})
 	if err != nil {
 		setConditionDegraded(&statusPatch.Status.Conditions, sr.Generation, wafv1.ReasonInvalidSpec, err.Error())

@@ -38,7 +38,7 @@ var _ = Describe("RuleSet Controller", func() {
 
 		typeNamespacedName := types.NamespacedName{
 			Name:      resourceName,
-			Namespace: "default", // TODO(user):Modify as needed
+			Namespace: testNamespace, // TODO(user):Modify as needed
 		}
 		ruleset := &wafv1.RuleSet{}
 
@@ -49,7 +49,7 @@ var _ = Describe("RuleSet Controller", func() {
 				resource := &wafv1.RuleSet{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      resourceName,
-						Namespace: "default",
+						Namespace: testNamespace,
 					},
 					Spec: wafv1.RuleSetSpec{
 						Sources: []wafv1.SourceRef{{Kind: wafv1.SourceRefKindSecRules, Name: "missing"}},

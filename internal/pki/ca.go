@@ -39,6 +39,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+// PEM block types written by this package.
+const (
+	pemTypeCertificate  = "CERTIFICATE"
+	pemTypeECPrivateKey = "EC PRIVATE KEY"
+)
+
 // CertAuthority holds a loaded or freshly generated self-signed CA.
 // Keys are kept in memory only; they are never logged.
 type CertAuthority struct {
@@ -193,7 +199,7 @@ func (ca *CertAuthority) IssueClientCertFromCSR(csr *x509.CertificateRequest, en
 		return nil, fmt.Errorf("sign client cert from CSR: %w", err)
 	}
 
-	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER}), nil
+	return pem.EncodeToMemory(&pem.Block{Type: pemTypeCertificate, Bytes: certDER}), nil
 }
 
 // BuildTLSConfig builds a *tls.Config for the gRPC server that:
@@ -270,12 +276,12 @@ func generateCA() (*CertAuthority, error) {
 		return nil, fmt.Errorf("parse CA cert: %w", err)
 	}
 
-	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER})
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: pemTypeCertificate, Bytes: certDER})
 	keyDER, err := x509.MarshalECPrivateKey(priv)
 	if err != nil {
 		return nil, fmt.Errorf("marshal CA key: %w", err)
 	}
-	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: pemTypeECPrivateKey, Bytes: keyDER})
 
 	return &CertAuthority{
 		Cert:    cert,
@@ -329,7 +335,7 @@ func signCert(tmpl *x509.Certificate, pub any, signerCert *x509.Certificate, sig
 	if err != nil {
 		return nil, fmt.Errorf("create certificate: %w", err)
 	}
-	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER}), nil
+	return pem.EncodeToMemory(&pem.Block{Type: pemTypeCertificate, Bytes: certDER}), nil
 }
 
 // marshalPrivKey DER-encodes an ECDSA private key and returns the PEM block.
@@ -339,7 +345,7 @@ func marshalPrivKey(priv *ecdsa.PrivateKey) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("marshal private key: %w", err)
 	}
-	return pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: der}), nil
+	return pem.EncodeToMemory(&pem.Block{Type: pemTypeECPrivateKey, Bytes: der}), nil
 }
 
 // newSerial generates a random 128-bit serial number for certificates.

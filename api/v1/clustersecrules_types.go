@@ -82,7 +82,3 @@ type ClusterSecRulesList struct {
 	metav1.ListMeta `json:"metadata,omitzero"`
 	Items           []ClusterSecRules `json:"items"`
 }
-
-func init() {
-	SchemeBuilder.Register(&ClusterSecRules{}, &ClusterSecRulesList{})
-}

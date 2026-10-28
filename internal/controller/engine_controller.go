@@ -365,7 +365,7 @@ func compileRuleSet(ctx context.Context, c client.Client, ns string, rs *wafv1.R
 				}
 				return nil, fmt.Errorf("get SecRules %s/%s: %w", ns, ref.Name, err)
 			}
-			sources = append(sources, compiler.Source{Kind: "SecRules", Name: ref.Name, Body: sr.Spec.Rules})
+			sources = append(sources, compiler.Source{Kind: string(wafv1.SourceRefKindSecRules), Name: ref.Name, Body: sr.Spec.Rules})
 
 		case wafv1.SourceRefKindClusterSecRules:
 			var csr wafv1.ClusterSecRules
@@ -376,7 +376,7 @@ func compileRuleSet(ctx context.Context, c client.Client, ns string, rs *wafv1.R
 				}
 				return nil, fmt.Errorf("get ClusterSecRules %s: %w", ref.Name, err)
 			}
-			sources = append(sources, compiler.Source{Kind: "ClusterSecRules", Name: ref.Name, Body: csr.Spec.Rules})
+			sources = append(sources, compiler.Source{Kind: string(wafv1.SourceRefKindClusterSecRules), Name: ref.Name, Body: csr.Spec.Rules})
 
 		default:
 			return nil, fmt.Errorf("unknown source kind %q in spec.sources", ref.Kind)

@@ -35,6 +35,9 @@ linters:
     modernize:
       disable:
         - omitzero
+        # Keep the Kubernetes idiom `ObjectMeta: metav1.ObjectMeta{...}`: promoting
+        # Name/Namespace into the outer literal hides which fields are metadata.
+        - embedlit
   exclusions:
     generated: lax
     rules:
