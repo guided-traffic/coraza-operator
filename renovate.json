@@ -262,6 +262,23 @@
       ]
     },
     {
+      "description": "k8s.io/kube-openapi has no releases; its HEAD digest moves ahead of the k8s.io/* release line (e.g. structured-merge-diff v6 -> v7) and then does not compile against k8s.io/apimachinery. It moves only when a k8s.io/* bump requires a newer revision, which go mod tidy applies in the Kubernetes group PR.",
+      "matchManagers": [
+        "gomod"
+      ],
+      "matchPackageNames": [
+        "k8s.io/kube-openapi"
+      ],
+      "enabled": false
+    },
+    {
+      "description": "conventional-changelog-conventionalcommits 10.4.0+ requires conventional-changelog-writer 9, but the stable @semantic-release/release-notes-generator (14.x) ships writer 8 and semantic-release fails in generateNotes. Release runs only on main, so PR CI cannot catch this. Lift the cap once a stable release-notes-generator depends on conventional-changelog-writer 9.",
+      "matchPackageNames": [
+        "conventional-changelog-conventionalcommits"
+      ],
+      "allowedVersions": "<10.4.0"
+    },
+    {
       "description": "Use 'fix' instead of 'chore' for dependency updates",
       "semanticCommitType": "fix",
       "matchUpdateTypes": [
