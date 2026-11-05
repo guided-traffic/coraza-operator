@@ -6,7 +6,7 @@ require (
 	github.com/corazawaf/coraza/v3 v3.8.1
 	github.com/dropmorepackets/haproxy-go v0.1.1
 	github.com/go-logr/logr v1.4.4
-	github.com/onsi/ginkgo/v2 v2.33.1
+	github.com/onsi/ginkgo/v2 v2.34.0
 	github.com/onsi/gomega v1.44.0
 	github.com/prometheus/client_golang v1.25.0
 	github.com/stretchr/testify v1.12.1
